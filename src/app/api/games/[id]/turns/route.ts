@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { BOT_PLAYER_ID } from "@/lib/game/bot";
 
 export async function POST(
   request: Request,
@@ -16,9 +17,9 @@ export async function POST(
   }
 
   const body = await request.json();
-  const { scoreEntered, dartsDetail, roundNumber } = body;
+  const { scoreEntered, dartsDetail, roundNumber, playerId } = body;
 
-  // Verify it's this player's turn
+  // Verify game exists and is active
   const { data: game } = await supabase
     .from("games")
     .select("*")
@@ -33,8 +34,24 @@ export async function POST(
     return NextResponse.json({ error: "Game is not active" }, { status: 400 });
   }
 
-  if (game.current_player_id !== user.id) {
+  const isBotGame = game.bot_level != null;
+  const turnPlayerId = playerId ?? user.id;
+
+  // For human games: verify it's this player's turn
+  // For bot games: allow the human to submit bot turns too
+  if (!isBotGame && game.current_player_id !== user.id) {
     return NextResponse.json({ error: "Not your turn" }, { status: 403 });
+  }
+
+  if (isBotGame) {
+    // Must be a participant
+    if (user.id !== game.player1_id && user.id !== game.player2_id) {
+      return NextResponse.json({ error: "Not a participant" }, { status: 403 });
+    }
+    // turnPlayerId must be either the human or the bot
+    if (turnPlayerId !== user.id && turnPlayerId !== BOT_PLAYER_ID) {
+      return NextResponse.json({ error: "Invalid player" }, { status: 400 });
+    }
   }
 
   // Insert the turn
@@ -42,7 +59,7 @@ export async function POST(
     .from("turns")
     .insert({
       game_id: gameId,
-      player_id: user.id,
+      player_id: turnPlayerId,
       round_number: roundNumber,
       score_entered: scoreEntered,
       darts_detail: dartsDetail,
@@ -56,8 +73,8 @@ export async function POST(
 
   // Switch turns
   const otherPlayerId =
-    game.player1_id === user.id ? game.player2_id : game.player1_id;
-  const isPlayer2 = user.id === game.player2_id;
+    game.player1_id === turnPlayerId ? game.player2_id : game.player1_id;
+  const isPlayer2 = turnPlayerId === game.player2_id;
   const newRound = isPlayer2 ? game.current_round + 1 : game.current_round;
 
   await supabase

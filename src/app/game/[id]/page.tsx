@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { subscribeToGame } from "@/lib/supabase/realtime";
@@ -24,6 +24,7 @@ import { X01Scoreboard } from "@/components/scoreboard/X01Scoreboard";
 import { CricketScoreboard } from "@/components/scoreboard/CricketScoreboard";
 import { TurnIndicator } from "@/components/scoreboard/TurnIndicator";
 import { EditScore } from "@/components/scoring/EditScore";
+import { BOT_PLAYER_ID, generateBotScore } from "@/lib/game/bot";
 
 interface GameRow {
   id: string;
@@ -34,6 +35,7 @@ interface GameRow {
   current_round: number;
   status: string;
   winner_id: string | null;
+  bot_level: number | null;
 }
 
 interface TurnRow {
@@ -57,8 +59,11 @@ export default function GamePage() {
   const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const botPlayingRef = useRef(false);
 
   const supabase = createClient();
+
+  const isBotGame = gameRow?.bot_level != null;
 
   // Load game data
   useEffect(() => {
@@ -94,7 +99,11 @@ export default function GamePage() {
 
       const names: Record<string, string> = {};
       players?.forEach((p) => {
-        names[p.id] = p.display_name;
+        if (p.id === BOT_PLAYER_ID && game.bot_level != null) {
+          names[p.id] = `DartBot (${game.bot_level})`;
+        } else {
+          names[p.id] = p.display_name;
+        }
       });
       setPlayerNames(names);
 
@@ -135,9 +144,9 @@ export default function GamePage() {
     load();
   }, [gameId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Subscribe to realtime updates
+  // Subscribe to realtime updates (only for human vs human games)
   useEffect(() => {
-    if (!gameRow) return;
+    if (!gameRow || isBotGame) return;
 
     const channel = subscribeToGame(
       supabase,
@@ -148,14 +157,12 @@ export default function GamePage() {
         );
       },
       (newTurn) => {
-        // When a new turn comes in from the other player, apply it
         const turn = newTurn as unknown as TurnRow;
-        if (turn.player_id === userId) return; // We already applied our own turn locally
+        if (turn.player_id === userId) return;
 
         setGameState((prev) => {
           if (!prev) return prev;
           const darts = turn.darts_detail;
-          // Score-only turns (X01 turn-based entry) have empty dartsDetail
           if (isX01State(prev) && (!darts || (darts as Dart[]).length === 0)) {
             const { newState } = applyScoreTurn(prev, turn.player_id, turn.score_entered);
             return newState;
@@ -169,7 +176,59 @@ export default function GamePage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [gameRow?.id, userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gameRow?.id, userId, isBotGame]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bot auto-play: submit a bot turn to the server and apply locally
+  const playBotTurn = useCallback(
+    async (currentState: GameState): Promise<GameState> => {
+      if (!gameRow || !isX01State(currentState)) return currentState;
+
+      const botLevel = gameRow.bot_level!;
+      const x01State = currentState as import("@/lib/game/types").X01GameState;
+      const botRemaining = x01State.scores[BOT_PLAYER_ID];
+      const botScore = generateBotScore(botLevel, botRemaining);
+
+      // Apply locally
+      const { newState } = applyScoreTurn(currentState, BOT_PLAYER_ID, botScore);
+
+      const scoreEntered = botScore;
+      // Recompute for bust: if the score caused a bust, scoreEntered in the turn is 0
+      const newX01State = newState as import("@/lib/game/types").X01GameState;
+      const actualRemaining = newX01State.scores[BOT_PLAYER_ID];
+      const wasBust = actualRemaining === botRemaining && botScore > 0;
+      const turnScore = wasBust ? 0 : scoreEntered;
+
+      // Persist to server
+      await fetch(`/api/games/${gameId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerId: BOT_PLAYER_ID,
+          scoreEntered: turnScore,
+          dartsDetail: [],
+          roundNumber: currentState.currentRound,
+        }),
+      });
+
+      return newState;
+    },
+    [gameRow, gameId]
+  );
+
+  // Finish game helper
+  const finishGame = useCallback(
+    async (winnerId: string) => {
+      await fetch(`/api/games/${gameId}/finish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ winnerId }),
+      });
+      setGameRow((prev) =>
+        prev ? { ...prev, status: "finished", winner_id: winnerId } : null
+      );
+    },
+    [gameId]
+  );
 
   const handleX01Submit = useCallback(
     async (score: number) => {
@@ -178,7 +237,7 @@ export default function GamePage() {
 
       setSubmitting(true);
 
-      // Apply locally first for instant feedback
+      // Apply human turn locally
       const { newState, result } = applyScoreTurn(gameState, userId, score);
       setGameState(newState);
 
@@ -186,7 +245,7 @@ export default function GamePage() {
         ? (result.bust ? 0 : result.scoreDeducted)
         : 0;
 
-      // Send to server
+      // Persist human turn
       await fetch(`/api/games/${gameId}/turns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -197,24 +256,36 @@ export default function GamePage() {
         }),
       });
 
-      // Check for game over
-      const gameOverResult = isGameOver(newState);
+      // Check for game over after human turn
+      let gameOverResult = isGameOver(newState);
       if (gameOverResult.over && gameOverResult.winnerId) {
-        await fetch(`/api/games/${gameId}/finish`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ winnerId: gameOverResult.winnerId }),
-        });
-        setGameRow((prev) =>
-          prev
-            ? { ...prev, status: "finished", winner_id: gameOverResult.winnerId! }
-            : null
-        );
+        await finishGame(gameOverResult.winnerId);
+        setSubmitting(false);
+        return;
+      }
+
+      // Bot auto-play
+      if (isBotGame && !botPlayingRef.current) {
+        botPlayingRef.current = true;
+
+        // Small delay for realism
+        await new Promise((r) => setTimeout(r, 600));
+
+        const stateAfterBot = await playBotTurn(newState);
+        setGameState(stateAfterBot);
+
+        // Check for game over after bot turn
+        gameOverResult = isGameOver(stateAfterBot);
+        if (gameOverResult.over && gameOverResult.winnerId) {
+          await finishGame(gameOverResult.winnerId);
+        }
+
+        botPlayingRef.current = false;
       }
 
       setSubmitting(false);
     },
-    [gameState, userId, gameRow, gameId, submitting]
+    [gameState, userId, gameRow, gameId, submitting, isBotGame, playBotTurn, finishGame]
   );
 
   const handleCricketSubmit = useCallback(
@@ -240,27 +311,16 @@ export default function GamePage() {
       });
 
       if ("gameOver" in result && result.gameOver && "winnerId" in result && result.winnerId) {
-        await fetch(`/api/games/${gameId}/finish`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ winnerId: result.winnerId }),
-        });
-        setGameRow((prev) =>
-          prev
-            ? { ...prev, status: "finished", winner_id: result.winnerId as string }
-            : null
-        );
+        await finishGame(result.winnerId as string);
       }
 
       setSubmitting(false);
     },
-    [gameState, userId, gameRow, gameId, submitting]
+    [gameState, userId, gameRow, gameId, submitting, finishGame]
   );
 
   const handleEditConfirm = useCallback(() => {
-    // Remove the last turn from local state
     if (!gameState) return;
-    // For now, close modal — full edit requires server-side turn deletion
     setEditModalOpen(false);
   }, [gameState]);
 

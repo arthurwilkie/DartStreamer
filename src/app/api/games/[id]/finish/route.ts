@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { BOT_PLAYER_ID } from "@/lib/game/bot";
 
 export async function POST(
   request: Request,
@@ -47,12 +48,15 @@ export async function POST(
 
     if (turns) {
       for (const playerId of [game.player1_id, game.player2_id]) {
+        // Skip bot player — no stats for bots
+        if (playerId === BOT_PLAYER_ID) continue;
+
         const won = playerId === winnerId;
         const playerTurns = turns.filter((t) => t.player_id === playerId);
         const totalScore = playerTurns.reduce((s, t) => s + t.score_entered, 0);
         const totalDarts = playerTurns.reduce((s, t) => {
           const detail = t.darts_detail as Array<Record<string, unknown>>;
-          return s + detail.length;
+          return s + (detail.length || 3); // Turn-based entry has no dart detail
         }, 0);
 
         // First 9 darts (first 3 turns)
@@ -60,7 +64,7 @@ export async function POST(
         const first9Score = first3Turns.reduce((s, t) => s + t.score_entered, 0);
         const first9Darts = first3Turns.reduce((s, t) => {
           const detail = t.darts_detail as Array<Record<string, unknown>>;
-          return s + detail.length;
+          return s + (detail.length || 3);
         }, 0);
 
         // Upsert statistics with incremental updates

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { BOT_PLAYER_ID } from "@/lib/game/bot";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -12,37 +13,65 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { mode, sessionId } = body as { mode: string; sessionId?: string };
+  const { mode, opponentId, botLevel, sessionId } = body as {
+    mode: string;
+    opponentId?: string;
+    botLevel?: number;
+    sessionId?: string;
+  };
 
   if (!["501", "301", "cricket"].includes(mode)) {
     return NextResponse.json({ error: "Invalid game mode" }, { status: 400 });
   }
 
-  // Find the other registered player
-  const { data: players } = await supabase
-    .from("players")
-    .select("id")
-    .neq("id", user.id)
-    .limit(1);
+  let player2Id: string;
+  let gameBotLevel: number | null = null;
 
-  if (!players || players.length === 0) {
+  if (botLevel != null) {
+    // Bot game
+    const level = Math.max(1, Math.min(10, Math.round(botLevel)));
+    player2Id = BOT_PLAYER_ID;
+    gameBotLevel = level;
+  } else if (opponentId) {
+    // Specific opponent selected
+    const { data: opponent } = await supabase
+      .from("players")
+      .select("id")
+      .eq("id", opponentId)
+      .single();
+
+    if (!opponent) {
+      return NextResponse.json(
+        { error: "Opponent not found" },
+        { status: 400 }
+      );
+    }
+
+    if (opponent.id === user.id) {
+      return NextResponse.json(
+        { error: "Cannot play against yourself" },
+        { status: 400 }
+      );
+    }
+
+    player2Id = opponent.id;
+  } else {
     return NextResponse.json(
-      { error: "No other player registered. Ask your opponent to sign up first." },
+      { error: "Select an opponent or choose to play vs bot" },
       { status: 400 }
     );
   }
-
-  const opponentId = players[0].id;
 
   const { data: game, error } = await supabase
     .from("games")
     .insert({
       mode,
       player1_id: user.id,
-      player2_id: opponentId,
+      player2_id: player2Id,
       current_player_id: user.id,
       current_round: 1,
       status: "active",
+      bot_level: gameBotLevel,
       session_id: sessionId ?? null,
     })
     .select()
