@@ -191,6 +191,93 @@ export function applyX01Turn(
   return { newState, result };
 }
 
+export function validateAndApplyScoreTurn(
+  state: X01GameState,
+  playerId: string,
+  score: number
+): X01TurnResult {
+  if (playerId !== state.currentPlayerId) {
+    return { valid: false, error: "Not your turn", scoreDeducted: 0, bust: false, checkout: false, dartsUsed: 0 };
+  }
+
+  if (score < 0 || score > 180) {
+    return { valid: false, error: "Score must be 0-180", scoreDeducted: 0, bust: false, checkout: false, dartsUsed: 0 };
+  }
+
+  const remaining = state.scores[playerId];
+  const newRemaining = remaining - score;
+
+  // Bust: went below zero
+  if (newRemaining < 0) {
+    return { valid: true, scoreDeducted: 0, bust: true, checkout: false, dartsUsed: 3 };
+  }
+
+  // Bust: can't finish on 1 (need a double, minimum double is 2)
+  if (newRemaining === 1) {
+    return { valid: true, scoreDeducted: 0, bust: true, checkout: false, dartsUsed: 3 };
+  }
+
+  // Checkout: reached exactly 0 — trust the player hit a valid double-out
+  if (newRemaining === 0) {
+    return { valid: true, scoreDeducted: score, bust: false, checkout: true, dartsUsed: 3 };
+  }
+
+  // Normal scoring turn
+  return { valid: true, scoreDeducted: score, bust: false, checkout: false, dartsUsed: 3 };
+}
+
+export function applyX01ScoreTurn(
+  state: X01GameState,
+  playerId: string,
+  score: number
+): { newState: X01GameState; result: X01TurnResult } {
+  const result = validateAndApplyScoreTurn(state, playerId, score);
+
+  if (!result.valid) {
+    return { newState: state, result };
+  }
+
+  const otherPlayer = Object.keys(state.scores).find((id) => id !== playerId)!;
+  const newScores = { ...state.scores };
+  const newDoubledIn = { ...state.hasDoubledIn };
+  const newDartsThrown = { ...state.dartsThrown };
+
+  if (!result.bust) {
+    newScores[playerId] = state.scores[playerId] - result.scoreDeducted;
+  }
+
+  // For 301: if they scored > 0, they've doubled in
+  if (state.mode === "301" && !state.hasDoubledIn[playerId] && result.scoreDeducted > 0) {
+    newDoubledIn[playerId] = true;
+  }
+
+  newDartsThrown[playerId] = (state.dartsThrown[playerId] || 0) + result.dartsUsed;
+
+  const turn: Turn = {
+    gameId: "",
+    playerId,
+    roundNumber: state.currentRound,
+    scoreEntered: result.bust ? 0 : result.scoreDeducted,
+    dartsDetail: [],
+    isEdited: false,
+  };
+
+  const isPlayer1 = playerId === Object.keys(state.scores)[0];
+  const newRound = !isPlayer1 ? state.currentRound + 1 : state.currentRound;
+
+  const newState: X01GameState = {
+    ...state,
+    scores: newScores,
+    hasDoubledIn: newDoubledIn,
+    dartsThrown: newDartsThrown,
+    currentPlayerId: result.checkout ? playerId : otherPlayer,
+    currentRound: result.checkout ? state.currentRound : newRound,
+    turns: [...state.turns, turn],
+  };
+
+  return { newState, result };
+}
+
 export function getCheckoutSuggestion(remaining: number): string | null {
   const checkouts: Record<number, string> = {
     170: "T20 T20 Bull",

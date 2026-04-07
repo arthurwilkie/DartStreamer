@@ -7,7 +7,7 @@ import {
   isX01State,
   isCricketState,
 } from "./types";
-import { createX01State, applyX01Turn, type X01TurnResult } from "./rules/x01";
+import { createX01State, applyX01Turn, applyX01ScoreTurn, type X01TurnResult } from "./rules/x01";
 import {
   createCricketState,
   applyCricketTurn,
@@ -38,6 +38,17 @@ export function applyTurn(
     return applyCricketTurn(state, playerId, darts as CricketDart[]);
   }
   throw new Error(`Unknown game mode`);
+}
+
+export function applyScoreTurn(
+  state: GameState,
+  playerId: string,
+  score: number
+): { newState: GameState; result: TurnResult } {
+  if (isX01State(state)) {
+    return applyX01ScoreTurn(state, playerId, score);
+  }
+  throw new Error("Score-only turns are only supported for X01 games");
 }
 
 export function isGameOver(state: GameState): { over: boolean; winnerId?: string } {

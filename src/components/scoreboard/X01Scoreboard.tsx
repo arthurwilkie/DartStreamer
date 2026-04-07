@@ -12,6 +12,16 @@ interface X01ScoreboardProps {
 export function X01Scoreboard({ state, playerNames, currentUserId }: X01ScoreboardProps) {
   const players = Object.keys(state.scores);
 
+  // Calculate per-player stats
+  function getPlayerStats(playerId: string) {
+    const playerTurns = state.turns.filter((t) => t.playerId === playerId);
+    const totalScore = playerTurns.reduce((sum, t) => sum + t.scoreEntered, 0);
+    const totalDarts = state.dartsThrown[playerId] || 0;
+    const threeDartAvg = totalDarts > 0 ? (totalScore / totalDarts) * 3 : 0;
+    const lastScore = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1].scoreEntered : null;
+    return { threeDartAvg, lastScore, dartsThrown: totalDarts };
+  }
+
   return (
     <div className="rounded-xl bg-zinc-900 p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -26,6 +36,7 @@ export function X01Scoreboard({ state, playerNames, currentUserId }: X01Scoreboa
           const isActive = playerId === state.currentPlayerId;
           const remaining = state.scores[playerId];
           const checkout = getCheckoutSuggestion(remaining);
+          const stats = getPlayerStats(playerId);
 
           return (
             <div
@@ -56,6 +67,27 @@ export function X01Scoreboard({ state, playerNames, currentUserId }: X01Scoreboa
                   {checkout}
                 </span>
               )}
+              {/* Live stats */}
+              <div className="mt-2 space-y-0.5 text-xs text-zinc-400">
+                <div className="flex justify-between">
+                  <span>3-dart avg.</span>
+                  <span className="font-medium text-zinc-300">
+                    {stats.threeDartAvg.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Last score</span>
+                  <span className="font-medium text-zinc-300">
+                    {stats.lastScore !== null ? stats.lastScore : "-"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Darts thrown</span>
+                  <span className="font-medium text-zinc-300">
+                    {stats.dartsThrown}
+                  </span>
+                </div>
+              </div>
             </div>
           );
         })}

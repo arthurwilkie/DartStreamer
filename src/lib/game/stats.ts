@@ -45,7 +45,7 @@ function calculateX01Stats(playerTurns: Turn[], won: boolean): GameStats {
     const turn = playerTurns[i];
     const darts = turn.dartsDetail as Dart[];
     const score = turn.scoreEntered;
-    const dartsInTurn = darts.length;
+    const dartsInTurn = darts.length || 3; // Turn-based entry has no dart detail, assume 3
 
     totalScore += score;
     totalDarts += dartsInTurn;

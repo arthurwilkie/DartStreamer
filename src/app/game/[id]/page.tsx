@@ -15,6 +15,7 @@ import {
 import {
   createGameState,
   applyTurn,
+  applyScoreTurn,
   isGameOver,
 } from "@/lib/game/engine";
 import { DartInput } from "@/components/scoring/DartInput";
@@ -41,7 +42,7 @@ interface TurnRow {
   player_id: string;
   round_number: number;
   score_entered: number;
-  darts_detail: Dart[] | CricketDart[];
+  darts_detail: Dart[] | CricketDart[] | [];
   is_edited: boolean;
 }
 
@@ -116,12 +117,15 @@ export default function GamePage() {
 
       if (turns) {
         for (const turn of turns) {
-          const { newState } = applyTurn(
-            state,
-            turn.player_id,
-            turn.darts_detail as Dart[] | CricketDart[]
-          );
-          state = newState;
+          const darts = turn.darts_detail as Dart[] | CricketDart[];
+          // Score-only turns (X01 turn-based entry) have empty dartsDetail
+          if (isX01State(state) && (!darts || (darts as Dart[]).length === 0)) {
+            const { newState } = applyScoreTurn(state, turn.player_id, turn.score_entered);
+            state = newState;
+          } else {
+            const { newState } = applyTurn(state, turn.player_id, darts);
+            state = newState;
+          }
         }
       }
 
@@ -150,11 +154,13 @@ export default function GamePage() {
 
         setGameState((prev) => {
           if (!prev) return prev;
-          const { newState } = applyTurn(
-            prev,
-            turn.player_id,
-            turn.darts_detail
-          );
+          const darts = turn.darts_detail;
+          // Score-only turns (X01 turn-based entry) have empty dartsDetail
+          if (isX01State(prev) && (!darts || (darts as Dart[]).length === 0)) {
+            const { newState } = applyScoreTurn(prev, turn.player_id, turn.score_entered);
+            return newState;
+          }
+          const { newState } = applyTurn(prev, turn.player_id, darts);
           return newState;
         });
       }
@@ -166,14 +172,14 @@ export default function GamePage() {
   }, [gameRow?.id, userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleX01Submit = useCallback(
-    async (darts: Dart[]) => {
+    async (score: number) => {
       if (!gameState || !userId || !gameRow || submitting) return;
       if (!isX01State(gameState)) return;
 
       setSubmitting(true);
 
       // Apply locally first for instant feedback
-      const { newState, result } = applyTurn(gameState, userId, darts);
+      const { newState, result } = applyScoreTurn(gameState, userId, score);
       setGameState(newState);
 
       const scoreEntered = result && "scoreDeducted" in result
@@ -186,7 +192,7 @@ export default function GamePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           scoreEntered,
-          dartsDetail: darts,
+          dartsDetail: [],
           roundNumber: gameState.currentRound,
         }),
       });
@@ -333,8 +339,7 @@ export default function GamePage() {
             {isX01State(gameState) && (
               <DartInput
                 onSubmit={handleX01Submit}
-                requireDoubleIn={gameState.mode === "301"}
-                hasDoubledIn={gameState.hasDoubledIn[userId]}
+                remainingScore={gameState.scores[userId]}
                 disabled={!isYourTurn || submitting}
               />
             )}
