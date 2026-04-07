@@ -36,6 +36,13 @@ yarn-error.log*
 # vercel
 .vercel
 
+# claude/omc state
+.claude/
+.omc/
+
+# server dependencies
+server/node_modules
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

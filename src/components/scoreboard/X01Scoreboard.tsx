@@ -1,0 +1,89 @@
+"use client";
+
+import { type X01GameState } from "@/lib/game/types";
+import { getCheckoutSuggestion } from "@/lib/game/rules/x01";
+
+interface X01ScoreboardProps {
+  state: X01GameState;
+  playerNames: Record<string, string>;
+  currentUserId: string;
+}
+
+export function X01Scoreboard({ state, playerNames, currentUserId }: X01ScoreboardProps) {
+  const players = Object.keys(state.scores);
+
+  return (
+    <div className="rounded-xl bg-zinc-900 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+          {state.mode} {state.mode === "501" ? "SIDO" : "DIDO"}
+        </h2>
+        <span className="text-sm text-zinc-500">Round {state.currentRound}</span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {players.map((playerId) => {
+          const isActive = playerId === state.currentPlayerId;
+          const remaining = state.scores[playerId];
+          const checkout = getCheckoutSuggestion(remaining);
+
+          return (
+            <div
+              key={playerId}
+              className={`rounded-lg p-4 transition-colors ${
+                isActive
+                  ? "bg-emerald-900/30 ring-2 ring-emerald-500"
+                  : "bg-zinc-800"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-zinc-400">
+                  {playerNames[playerId] ?? "Player"}
+                  {playerId === currentUserId && " (You)"}
+                </span>
+                {isActive && (
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                )}
+              </div>
+              <div className="mt-1 text-4xl font-bold text-white">
+                {remaining}
+              </div>
+              {state.mode === "301" && !state.hasDoubledIn[playerId] && (
+                <span className="text-xs text-amber-400">Needs double-in</span>
+              )}
+              {checkout && remaining <= 170 && (
+                <span className="mt-1 block text-xs text-zinc-500">
+                  {checkout}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Recent turns */}
+      {state.turns.length > 0 && (
+        <div className="mt-4">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            Recent
+          </h3>
+          <div className="space-y-1">
+            {state.turns.slice(-6).map((turn, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between rounded bg-zinc-800/50 px-3 py-1.5 text-sm"
+              >
+                <span className="text-zinc-400">
+                  {playerNames[turn.playerId] ?? "Player"} R{turn.roundNumber}
+                </span>
+                <span className="font-medium text-white">
+                  {turn.scoreEntered}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
