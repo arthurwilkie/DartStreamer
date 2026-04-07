@@ -21,7 +21,15 @@ export default async function ProfilePage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="mx-auto max-w-2xl px-4 py-12">
-        <h1 className="text-2xl font-bold">Profile</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Profile</h1>
+          <a
+            href="/"
+            className="text-sm text-zinc-400 hover:text-white"
+          >
+            Back
+          </a>
+        </div>
 
         <div className="mt-8 flex items-center gap-4">
           {player?.avatar_url && (

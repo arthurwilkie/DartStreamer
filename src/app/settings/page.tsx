@@ -68,7 +68,15 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="mx-auto max-w-md px-4 py-12">
-        <h1 className="text-2xl font-bold">Settings</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Settings</h1>
+          <button
+            onClick={() => router.push("/")}
+            className="text-sm text-zinc-400 hover:text-white"
+          >
+            Back
+          </button>
+        </div>
 
         <div className="mt-8">
           <label className="block text-sm font-medium text-zinc-400">
@@ -95,12 +103,6 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        <button
-          onClick={() => router.push("/")}
-          className="mt-8 w-full rounded-lg border border-zinc-700 py-3 text-sm text-zinc-400 transition-colors hover:border-zinc-500"
-        >
-          Back
-        </button>
       </div>
     </div>
   );
