@@ -16,7 +16,7 @@ export function DartInput({
   const [input, setInput] = useState("");
 
   const score = input === "" ? 0 : parseInt(input, 10);
-  const isValid = input !== "" && score >= 0 && score <= 180;
+  const isValid = score >= 0 && score <= 180;
 
   function handleDigit(digit: number) {
     const next = input + digit.toString();

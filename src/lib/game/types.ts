@@ -22,6 +22,8 @@ export interface Turn {
   scoreEntered: number;
   dartsDetail: DartsDetail;
   isEdited: boolean;
+  dartsAtDouble?: number | null;
+  dartsForCheckout?: number | null;
 }
 
 export interface X01GameState {

@@ -28,6 +28,8 @@ import { GameStatsDisplay } from "@/components/game/GameStatsDisplay";
 import { TurnHistory } from "@/components/game/TurnHistory";
 import { BOT_PLAYER_ID, generateBotScore } from "@/lib/game/bot";
 import { calculateGameStatsForPlayer } from "@/lib/game/stats";
+import { shouldShowDartsAtDoublePopup, getDartsAtDoubleOptions } from "@/lib/game/checkouts";
+import { DartsAtDoublePopup } from "@/components/scoring/DartsAtDoublePopup";
 
 interface GameRow {
   id: string;
@@ -63,6 +65,10 @@ export default function GamePage() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const botPlayingRef = useRef(false);
+  const [pendingScore, setPendingScore] = useState<number | null>(null);
+  const [pendingCheckedOut, setPendingCheckedOut] = useState(false);
+  const [dartsAtDoubleOptions, setDartsAtDoubleOptions] = useState<number[]>([]);
+  const [showDartsAtDoublePopup, setShowDartsAtDoublePopup] = useState(false);
 
   const supabase = createClient();
 
@@ -233,9 +239,9 @@ export default function GamePage() {
     [gameId]
   );
 
-  const handleX01Submit = useCallback(
-    async (score: number) => {
-      if (!gameState || !userId || !gameRow || submitting) return;
+  const commitX01Turn = useCallback(
+    async (score: number, dartsAtDouble?: number, dartsForCheckout?: number) => {
+      if (!gameState || !userId || !gameRow) return;
       if (!isX01State(gameState)) return;
 
       setSubmitting(true);
@@ -256,6 +262,8 @@ export default function GamePage() {
           scoreEntered,
           dartsDetail: [],
           roundNumber: gameState.currentRound,
+          ...(dartsAtDouble != null ? { dartsAtDouble } : {}),
+          ...(dartsForCheckout != null ? { dartsForCheckout } : {}),
         }),
       });
 
@@ -288,7 +296,41 @@ export default function GamePage() {
 
       setSubmitting(false);
     },
-    [gameState, userId, gameRow, gameId, submitting, isBotGame, playBotTurn, finishGame]
+    [gameState, userId, gameRow, gameId, isBotGame, playBotTurn, finishGame]
+  );
+
+  const handleX01Submit = useCallback(
+    (score: number) => {
+      if (!gameState || !userId || !gameRow || submitting) return;
+      if (!isX01State(gameState)) return;
+
+      const remaining = gameState.scores[userId];
+      const checkedOut = score === remaining;
+
+      // Check if we need the darts-at-double popup
+      if (shouldShowDartsAtDoublePopup(remaining)) {
+        const options = getDartsAtDoubleOptions(remaining, checkedOut);
+        setPendingScore(score);
+        setPendingCheckedOut(checkedOut);
+        setDartsAtDoubleOptions(options);
+        setShowDartsAtDoublePopup(true);
+        return;
+      }
+
+      commitX01Turn(score);
+    },
+    [gameState, userId, gameRow, submitting, commitX01Turn]
+  );
+
+  const handleDartsAtDoubleConfirm = useCallback(
+    (dartsAtDouble: number, dartsForCheckout?: number) => {
+      setShowDartsAtDoublePopup(false);
+      if (pendingScore !== null) {
+        commitX01Turn(pendingScore, dartsAtDouble, dartsForCheckout);
+        setPendingScore(null);
+      }
+    },
+    [pendingScore, commitX01Turn]
   );
 
   const handleCricketSubmit = useCallback(
@@ -473,6 +515,13 @@ export default function GamePage() {
           lastTurnDarts={lastTurn?.dartsDetail ?? null}
           lastTurnScore={lastTurn?.scoreEntered ?? 0}
           mode={gameState.mode}
+        />
+
+        <DartsAtDoublePopup
+          isOpen={showDartsAtDoublePopup}
+          options={dartsAtDoubleOptions}
+          checkedOut={pendingCheckedOut}
+          onConfirm={handleDartsAtDoubleConfirm}
         />
       </div>
     </div>

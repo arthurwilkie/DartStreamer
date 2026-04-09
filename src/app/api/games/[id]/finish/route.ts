@@ -55,6 +55,8 @@ export async function POST(
         const playerTurns = turns.filter((t) => t.player_id === playerId);
         const totalScore = playerTurns.reduce((s, t) => s + t.score_entered, 0);
         const totalDarts = playerTurns.reduce((s, t) => {
+          // Use darts_for_checkout for checkout turns (accurate count), otherwise 3
+          if (t.darts_for_checkout != null) return s + t.darts_for_checkout;
           const detail = t.darts_detail as Array<Record<string, unknown>>;
           return s + (detail.length || 3); // Turn-based entry has no dart detail
         }, 0);
@@ -63,6 +65,7 @@ export async function POST(
         const first3Turns = playerTurns.slice(0, 3);
         const first9Score = first3Turns.reduce((s, t) => s + t.score_entered, 0);
         const first9Darts = first3Turns.reduce((s, t) => {
+          if (t.darts_for_checkout != null) return s + t.darts_for_checkout;
           const detail = t.darts_detail as Array<Record<string, unknown>>;
           return s + (detail.length || 3);
         }, 0);
@@ -79,6 +82,12 @@ export async function POST(
           ? playerTurns[playerTurns.length - 1].score_entered
           : 0;
 
+        // Sum darts_at_double from all turns for checkout attempt tracking
+        const totalDartsAtDouble = playerTurns.reduce(
+          (s, t) => s + (t.darts_at_double ?? 0), 0
+        );
+        const hasCheckoutData = playerTurns.some((t) => t.darts_at_double != null);
+
         if (existing) {
           await supabase
             .from("statistics")
@@ -89,7 +98,7 @@ export async function POST(
               first_9_score_sum: existing.first_9_score_sum + first9Score,
               first_9_darts: existing.first_9_darts + first9Darts,
               first_9_rounds: existing.first_9_rounds + Math.min(3, playerTurns.length),
-              checkout_attempts: existing.checkout_attempts + (won ? 1 : 0),
+              checkout_attempts: existing.checkout_attempts + (hasCheckoutData ? totalDartsAtDouble : (won ? 1 : 0)),
               checkout_successes: existing.checkout_successes + (won ? 1 : 0),
               highest_checkout: Math.max(existing.highest_checkout ?? 0, won ? lastTurnScore : 0),
               wins: existing.wins + (won ? 1 : 0),
@@ -122,7 +131,7 @@ export async function POST(
             first_9_score_sum: first9Score,
             first_9_darts: first9Darts,
             first_9_rounds: Math.min(3, playerTurns.length),
-            checkout_attempts: won ? 1 : 0,
+            checkout_attempts: hasCheckoutData ? totalDartsAtDouble : (won ? 1 : 0),
             checkout_successes: won ? 1 : 0,
             highest_checkout: won ? lastTurnScore : 0,
             wins: won ? 1 : 0,

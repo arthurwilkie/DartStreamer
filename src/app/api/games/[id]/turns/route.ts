@@ -17,7 +17,7 @@ export async function POST(
   }
 
   const body = await request.json();
-  const { scoreEntered, dartsDetail, roundNumber, playerId } = body;
+  const { scoreEntered, dartsDetail, roundNumber, playerId, dartsAtDouble, dartsForCheckout } = body;
 
   // Verify game exists and is active
   const { data: game } = await supabase
@@ -63,6 +63,8 @@ export async function POST(
       round_number: roundNumber,
       score_entered: scoreEntered,
       darts_detail: dartsDetail,
+      ...(dartsAtDouble != null ? { darts_at_double: dartsAtDouble } : {}),
+      ...(dartsForCheckout != null ? { darts_for_checkout: dartsForCheckout } : {}),
     })
     .select()
     .single();
