@@ -9,6 +9,8 @@ export interface GameStats {
   first9Avg: number;
   is180: boolean;
   isTonPlus: boolean;
+  count180: number;
+  countTonPlus: number;
   checkoutAttempted: boolean;
   checkoutSuccess: boolean;
   checkoutValue: number;
@@ -35,8 +37,8 @@ function calculateX01Stats(playerTurns: Turn[], won: boolean): GameStats {
   let totalDarts = 0;
   let first9Score = 0;
   let first9Darts = 0;
-  let has180 = false;
-  let hasTonPlus = false;
+  let count180 = 0;
+  let countTonPlus = 0;
   let checkoutAttempted = false;
   let checkoutSuccess = false;
   let checkoutValue = 0;
@@ -58,12 +60,12 @@ function calculateX01Stats(playerTurns: Turn[], won: boolean): GameStats {
 
     // 180 check (must be 3 darts, all triple 20)
     if (score === 180 && dartsInTurn === 3) {
-      has180 = true;
+      count180++;
     }
 
     // Ton+ check (100+ in a turn)
     if (score >= 100) {
-      hasTonPlus = true;
+      countTonPlus++;
     }
 
     // Checkout: last turn if player won
@@ -86,8 +88,10 @@ function calculateX01Stats(playerTurns: Turn[], won: boolean): GameStats {
     first9Score,
     first9Darts,
     first9Avg,
-    is180: has180,
-    isTonPlus: hasTonPlus,
+    is180: count180 > 0,
+    isTonPlus: countTonPlus > 0,
+    count180,
+    countTonPlus,
     checkoutAttempted,
     checkoutSuccess,
     checkoutValue,
@@ -114,6 +118,8 @@ function calculateCricketStats(playerTurns: Turn[], _won: boolean): GameStats {
     first9Avg: 0,
     is180: false,
     isTonPlus: false,
+    count180: 0,
+    countTonPlus: 0,
     checkoutAttempted: false,
     checkoutSuccess: false,
     checkoutValue: 0,

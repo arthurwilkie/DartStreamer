@@ -79,9 +79,10 @@ export default async function HistoryPage() {
                 : "";
 
               return (
-                <div
+                <Link
                   key={game.id}
-                  className="flex items-center justify-between rounded-lg bg-zinc-800 px-4 py-3"
+                  href={`/history/${game.id}`}
+                  className="flex items-center justify-between rounded-lg bg-zinc-800 px-4 py-3 transition-colors hover:bg-zinc-700"
                 >
                   <div>
                     <div className="flex items-center gap-2">
@@ -102,7 +103,8 @@ export default async function HistoryPage() {
                       vs {nameMap[opponentId] ?? "Player"} &middot; {date}
                     </div>
                   </div>
-                </div>
+                  <span className="text-zinc-600">&rsaquo;</span>
+                </Link>
               );
             })}
           </div>
