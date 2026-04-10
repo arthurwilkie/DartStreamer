@@ -1,10 +1,8 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
-import { validateCode } from "@/lib/pairing/codes";
+import { Suspense, useEffect, useRef, useState } from "react";
 
-type PairingState = "setup" | "pairing" | "paired" | "error";
+type CameraState = "loading" | "ready" | "paired" | "error";
 
 export default function CameraPage() {
   return (
@@ -21,24 +19,16 @@ export default function CameraPage() {
 }
 
 function CameraPageInner() {
-  const searchParams = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [code, setCode] = useState("");
-  const [state, setState] = useState<PairingState>("setup");
+  const [cameraState, setCameraState] = useState<CameraState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [zoom, setZoom] = useState(1);
-  const [cameraReady, setCameraReady] = useState(false);
-  const autoPairAttempted = useRef(false);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for future WebRTC signaling
+  const [_pairingId, setPairingId] = useState<string | null>(null);
+  const codeGenerated = useRef(false);
 
-  // Check for code in URL params (QR code scan flow)
-  useEffect(() => {
-    const urlCode = searchParams.get("code");
-    if (urlCode && validateCode(urlCode) && !autoPairAttempted.current) {
-      autoPairAttempted.current = true;
-      setCode(urlCode); // eslint-disable-line react-hooks/set-state-in-effect -- sync from URL param on mount
-    }
-  }, [searchParams]);
-
+  // Start camera on mount
   useEffect(() => {
     let stream: MediaStream | null = null;
 
@@ -55,10 +45,10 @@ function CameraPageInner() {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
-        setCameraReady(true);
+        setCameraState("ready");
       } catch {
         setErrorMessage("Camera permission denied. Please allow camera access.");
-        setState("error");
+        setCameraState("error");
       }
     }
 
@@ -69,55 +59,53 @@ function CameraPageInner() {
     };
   }, []);
 
-  const handlePair = useCallback(async () => {
-    if (!validateCode(code)) {
-      setErrorMessage("Please enter a valid 6-digit code.");
-      setState("error");
-      return;
-    }
-
-    setState("pairing");
-    setErrorMessage("");
-
-    try {
-      const res = await fetch("/api/pairing", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
-        setErrorMessage(data.error ?? "Pairing failed. Check your code.");
-        setState("error");
-        return;
-      }
-
-      setState("paired");
-    } catch {
-      setErrorMessage("Network error. Please try again.");
-      setState("error");
-    }
-  }, [code]);
-
-  // Auto-pair when camera is ready and code is from URL
+  // Generate pairing code once camera is ready
   useEffect(() => {
-    if (cameraReady && autoPairAttempted.current && code && state === "setup") {
-      void handlePair(); // eslint-disable-line react-hooks/set-state-in-effect -- auto-pair from URL on mount
+    if (cameraState !== "ready" || codeGenerated.current) return;
+    codeGenerated.current = true;
+
+    async function generateCode() {
+      try {
+        const res = await fetch("/api/pairing", { method: "POST" });
+        if (!res.ok) {
+          setErrorMessage("Failed to generate pairing code.");
+          setCameraState("error");
+          return;
+        }
+        const data = (await res.json()) as { code: string; pairingId: string };
+        setPairingCode(data.code);
+        setPairingId(data.pairingId);
+      } catch {
+        setErrorMessage("Network error. Could not generate code.");
+        setCameraState("error");
+      }
     }
-  }, [cameraReady, code, handlePair, state]);
+
+    void generateCode();
+  }, [cameraState]);
+
+  // Poll for pairing status (check if scoring device has claimed the code)
+  useEffect(() => {
+    if (!pairingCode || cameraState === "paired") return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/pairing/status?code=${pairingCode}`);
+        if (res.ok) {
+          const data = (await res.json()) as { status: string };
+          if (data.status === "paired") {
+            setCameraState("paired");
+          }
+        }
+      } catch {
+        // Silently ignore polling errors
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [pairingCode, cameraState]);
 
   async function handleDisconnect() {
-    try {
-      await fetch("/api/pairing", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-    } catch {
-      // Best-effort disconnect
-    }
-
     // Stop camera tracks
     if (videoRef.current?.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
@@ -125,19 +113,34 @@ function CameraPageInner() {
       videoRef.current.srcObject = null;
     }
 
-    setCameraReady(false);
-    setCode("");
-    setState("setup");
+    setCameraState("loading");
+    setPairingCode(null);
+    setPairingId(null);
+    codeGenerated.current = false;
   }
 
   function handleRetry() {
-    setCode("");
     setErrorMessage("");
-    setState("setup");
+    setCameraState("loading");
+    setPairingCode(null);
+    setPairingId(null);
+    codeGenerated.current = false;
+    // Re-trigger camera start
+    window.location.reload();
   }
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-950 text-white">
+      {/* Header */}
+      <div className="border-b border-zinc-800 px-4 py-3">
+        <h1 className="text-center text-lg font-bold">Link Your Camera</h1>
+        {cameraState !== "paired" && (
+          <p className="mt-1 text-center text-xs text-zinc-500">
+            Enter the code below in the DartStreamer app on your scoring device
+          </p>
+        )}
+      </div>
+
       {/* Camera preview */}
       <div className="relative flex-1 overflow-hidden bg-black">
         <video
@@ -148,12 +151,12 @@ function CameraPageInner() {
           className="h-full w-full object-cover"
           style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}
         />
-        {!cameraReady && state !== "error" && (
+        {cameraState === "loading" && (
           <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
             <p className="text-zinc-400">Starting camera&hellip;</p>
           </div>
         )}
-        {state === "paired" && (
+        {cameraState === "paired" && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40">
             <div className="flex flex-col items-center gap-2">
               <span className="h-4 w-4 rounded-full bg-emerald-400" />
@@ -166,7 +169,7 @@ function CameraPageInner() {
       {/* Controls */}
       <div className="space-y-4 p-4">
         {/* Zoom slider */}
-        {cameraReady && (
+        {(cameraState === "ready" || cameraState === "paired") && (
           <div className="flex items-center gap-3">
             <span className="w-8 text-sm text-zinc-400">1x</span>
             <input
@@ -182,37 +185,31 @@ function CameraPageInner() {
           </div>
         )}
 
-        {state === "setup" && (
+        {/* Pairing code display */}
+        {cameraState === "ready" && pairingCode && (
           <div className="space-y-3">
-            <p className="text-sm text-zinc-400">
-              Enter the 6-digit code shown on the game screen.
-            </p>
-            <input
-              type="tel"
-              inputMode="numeric"
-              maxLength={6}
-              placeholder="000000"
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              className="h-14 w-full rounded-lg bg-zinc-800 px-4 text-center text-2xl font-mono tracking-widest text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-            <button
-              onClick={() => void handlePair()}
-              disabled={code.length !== 6}
-              className="h-12 w-full rounded-lg bg-emerald-600 font-bold text-white transition-colors hover:bg-emerald-500 disabled:opacity-40"
-            >
-              Pair Camera
-            </button>
+            <div className="rounded-xl bg-zinc-800 p-4">
+              <p className="text-center text-xs font-medium uppercase tracking-wider text-zinc-500">
+                Code
+              </p>
+              <p className="mt-2 text-center font-mono text-4xl font-bold tracking-widest text-white">
+                {pairingCode.slice(0, 3)} {pairingCode.slice(3)}
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-400" />
+              <p className="text-sm text-zinc-400">Waiting to be linked...</p>
+            </div>
           </div>
         )}
 
-        {state === "pairing" && (
+        {cameraState === "ready" && !pairingCode && (
           <div className="flex h-12 items-center justify-center">
-            <p className="text-zinc-400">Pairing&hellip;</p>
+            <p className="text-zinc-400">Generating code&hellip;</p>
           </div>
         )}
 
-        {state === "paired" && (
+        {cameraState === "paired" && (
           <div className="space-y-3">
             <div className="flex h-12 items-center justify-center gap-2">
               <span className="h-3 w-3 rounded-full bg-emerald-400" />
@@ -227,7 +224,7 @@ function CameraPageInner() {
           </div>
         )}
 
-        {state === "error" && (
+        {cameraState === "error" && (
           <div className="space-y-3">
             <p className="rounded-lg bg-red-950 px-4 py-3 text-sm text-red-300">
               {errorMessage}

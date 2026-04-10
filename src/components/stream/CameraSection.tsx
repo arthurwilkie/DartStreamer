@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { QRCodeDisplay } from "./QRCodeDisplay";
 
 type CameraType = "none" | "device" | "external";
 type ConnectionStatus = "disconnected" | "connecting" | "connected";
@@ -11,25 +10,23 @@ interface Props {
   activeCameraType: CameraType;
   deviceStatus: ConnectionStatus;
   externalStatus: ConnectionStatus;
-  externalPairingCode: string | null;
   onActivateDevice: () => void;
   onDeactivateDevice: () => void;
-  onGenerateExternalCode: () => void;
+  onClaimExternalCode: (code: string) => void;
   onDisconnectExternal: () => void;
 }
 
 export function CameraSection({
-  sessionId: _sessionId,
   activeCameraType,
   deviceStatus,
   externalStatus,
-  externalPairingCode,
   onActivateDevice,
   onDeactivateDevice,
-  onGenerateExternalCode,
+  onClaimExternalCode,
   onDisconnectExternal,
 }: Props) {
   const [error, setError] = useState<string | null>(null);
+  const [codeInput, setCodeInput] = useState("");
 
   const handleDeviceToggle = useCallback(() => {
     if (activeCameraType === "external" && externalStatus === "connected") {
@@ -52,10 +49,23 @@ export function CameraSection({
     setError(null);
     if (externalStatus === "connected") {
       onDisconnectExternal();
-    } else {
-      onGenerateExternalCode();
     }
-  }, [activeCameraType, deviceStatus, externalStatus, onGenerateExternalCode, onDisconnectExternal]);
+  }, [activeCameraType, deviceStatus, externalStatus, onDisconnectExternal]);
+
+  const handleSubmitCode = useCallback(() => {
+    const cleaned = codeInput.replace(/\s/g, "");
+    if (!/^\d{6}$/.test(cleaned)) {
+      setError("Enter a valid 6-digit code.");
+      return;
+    }
+    if (activeCameraType === "device" && deviceStatus === "connected") {
+      setError("Disconnect your device camera first.");
+      return;
+    }
+    setError(null);
+    onClaimExternalCode(cleaned);
+    setCodeInput("");
+  }, [codeInput, activeCameraType, deviceStatus, onClaimExternalCode]);
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
@@ -126,23 +136,41 @@ export function CameraSection({
             >
               Disconnect
             </button>
-          ) : externalPairingCode ? (
-            <div className="mt-4">
-              <QRCodeDisplay code={externalPairingCode} />
-              <button
-                onClick={onGenerateExternalCode}
-                className="mt-3 w-full rounded-lg border border-zinc-600 py-2 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-500"
-              >
-                Regenerate Code
-              </button>
-            </div>
           ) : (
-            <button
-              onClick={handleExternalToggle}
-              className="mt-3 w-full rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
-            >
-              Generate Pairing Code
-            </button>
+            <div className="mt-4 space-y-3">
+              <p className="text-xs text-zinc-400">
+                Open{" "}
+                <span className="font-mono font-medium text-zinc-200">
+                  darts.vaderspace.com/camera
+                </span>{" "}
+                on your external device, then enter the 6-digit code shown there.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={7}
+                  value={codeInput}
+                  onChange={(e) => {
+                    // Allow digits and a single space for "123 456" format
+                    const raw = e.target.value.replace(/[^\d\s]/g, "");
+                    setCodeInput(raw);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSubmitCode();
+                  }}
+                  placeholder="123 456"
+                  className="flex-1 rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-center font-mono text-lg tracking-widest text-white placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none"
+                />
+                <button
+                  onClick={handleSubmitCode}
+                  disabled={externalStatus === "connecting"}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  {externalStatus === "connecting" ? "..." : "Link"}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

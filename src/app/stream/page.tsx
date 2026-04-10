@@ -39,7 +39,6 @@ export default function StreamPage() {
   const [activeCameraType, setActiveCameraType] = useState<CameraType>("none");
   const [deviceStatus, setDeviceStatus] = useState<ConnectionStatus>("disconnected");
   const [externalStatus, setExternalStatus] = useState<ConnectionStatus>("disconnected");
-  const [externalPairingCode, setExternalPairingCode] = useState<string | null>(null);
   const [opponentCameraStatus, setOpponentCameraStatus] = useState<"connected" | "disconnected">("disconnected");
 
   // Load user, session, and stream key
@@ -125,7 +124,7 @@ export default function StreamPage() {
             setExternalStatus("connected");
           } else if (ownPairings[0].status === "pending") {
             setActiveCameraType("external");
-            setExternalPairingCode(ownPairings[0].pairing_code);
+            setExternalStatus("connecting");
           }
         }
       }
@@ -156,7 +155,6 @@ export default function StreamPage() {
               setActiveCameraType("external");
             } else if (row.status === "expired") {
               setExternalStatus("disconnected");
-              setExternalPairingCode(null);
               setActiveCameraType("none");
             }
           } else {
@@ -226,29 +224,31 @@ export default function StreamPage() {
     setActiveCameraType("none");
   }, []);
 
-  const handleGenerateExternalCode = useCallback(async () => {
-    if (!activeSession || !userId) return;
+  const handleClaimExternalCode = useCallback(async (code: string) => {
+    if (!activeSession) return;
+
+    setExternalStatus("connecting");
+    setActiveCameraType("external");
 
     const res = await fetch("/api/pairing", {
-      method: "POST",
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        code,
         sessionId: activeSession.id,
-        cameraPosition: "left",
       }),
     });
 
     if (res.ok) {
-      const data = (await res.json()) as { code: string };
-      setExternalPairingCode(data.code);
-      setActiveCameraType("external");
+      setExternalStatus("connected");
+    } else {
       setExternalStatus("disconnected");
+      setActiveCameraType("none");
     }
-  }, [activeSession, userId]);
+  }, [activeSession]);
 
   const handleDisconnectExternal = useCallback(() => {
     setExternalStatus("disconnected");
-    setExternalPairingCode(null);
     setActiveCameraType("none");
   }, []);
 
@@ -309,10 +309,9 @@ export default function StreamPage() {
             activeCameraType={activeCameraType}
             deviceStatus={deviceStatus}
             externalStatus={externalStatus}
-            externalPairingCode={externalPairingCode}
             onActivateDevice={handleActivateDevice}
             onDeactivateDevice={handleDeactivateDevice}
-            onGenerateExternalCode={() => void handleGenerateExternalCode()}
+            onClaimExternalCode={(code) => void handleClaimExternalCode(code)}
             onDisconnectExternal={handleDisconnectExternal}
           />
 
