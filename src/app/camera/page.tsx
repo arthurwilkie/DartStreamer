@@ -1,12 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { Suspense, useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { validateCode } from "@/lib/pairing/codes";
 
 type PairingState = "setup" | "pairing" | "paired" | "error";
 
 export default function CameraPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-zinc-950">
+          <p className="text-zinc-400">Loading camera...</p>
+        </div>
+      }
+    >
+      <CameraPageInner />
+    </Suspense>
+  );
+}
+
+function CameraPageInner() {
   const searchParams = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [code, setCode] = useState("");
