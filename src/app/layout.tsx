@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { SessionProvider } from "@/lib/session/SessionContext";
+import { StreamBanner } from "@/components/stream/StreamBanner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,7 +36,12 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
       </head>
-      <body className="min-h-full flex flex-col bg-zinc-950">{children}</body>
+      <body className="min-h-full flex flex-col bg-zinc-950">
+        <SessionProvider>
+          <StreamBanner />
+          {children}
+        </SessionProvider>
+      </body>
     </html>
   );
 }

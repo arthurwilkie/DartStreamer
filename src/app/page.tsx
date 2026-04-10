@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { BOT_PLAYER_ID } from "@/lib/game/bot";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -56,10 +57,15 @@ export default async function Home() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="mx-auto max-w-2xl px-4 py-12">
-        <h1 className="text-3xl font-bold">DartStreamer</h1>
-        <p className="mt-1 text-zinc-400">
-          Welcome back, {player?.display_name ?? "Player"}
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">DartStreamer</h1>
+            <p className="mt-1 text-zinc-400">
+              Welcome back, {player?.display_name ?? "Player"}
+            </p>
+          </div>
+          <NotificationBell />
+        </div>
 
         {/* Active games */}
         {activeGames && activeGames.length > 0 && (

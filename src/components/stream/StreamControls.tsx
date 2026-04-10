@@ -14,6 +14,8 @@ interface StreamHealthResponse {
 
 interface Props {
   sessionId: string;
+  savedStreamKey: string | null;
+  onStreamStatusChange?: (status: StreamStatus) => void;
 }
 
 function StatusDot({ status }: { status: StreamStatus }) {
@@ -24,7 +26,7 @@ function StatusDot({ status }: { status: StreamStatus }) {
     case "connecting":
       return <span className={`${base} bg-yellow-400 animate-pulse`} />;
     case "live":
-      return <span className={`${base} bg-emerald-500 animate-pulse`} />;
+      return <span className={`${base} bg-red-500 animate-pulse`} />;
     case "error":
       return <span className={`${base} bg-red-500`} />;
   }
@@ -33,21 +35,35 @@ function StatusDot({ status }: { status: StreamStatus }) {
 function statusLabel(status: StreamStatus): string {
   switch (status) {
     case "idle":
-      return "Idle";
+      return "Not streaming";
     case "connecting":
-      return "Connecting…";
+      return "Connecting...";
     case "live":
-      return "Live";
+      return "LIVE on YouTube";
     case "error":
       return "Error";
   }
 }
 
-export function StreamControls({ sessionId }: Props) {
+function maskKey(key: string): string {
+  if (key.length <= 4) return "****";
+  return "\u2022".repeat(key.length - 4) + key.slice(-4);
+}
+
+export function StreamControls({ sessionId, savedStreamKey, onStreamStatusChange }: Props) {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [health, setHealth] = useState<StreamHealthResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [useOverrideKey, setUseOverrideKey] = useState(false);
+  const [overrideKey, setOverrideKey] = useState("");
+
+  const activeKey = useOverrideKey && overrideKey ? overrideKey : savedStreamKey;
+
+  const updateStatus = useCallback((status: StreamStatus) => {
+    setStreamStatus(status);
+    onStreamStatusChange?.(status);
+  }, [onStreamStatusChange]);
 
   const pollStatus = useCallback(async () => {
     try {
@@ -59,17 +75,17 @@ export function StreamControls({ sessionId }: Props) {
       const data = (await res.json()) as StreamHealthResponse;
       setHealth(data);
       if (data.error) {
-        setStreamStatus("error");
+        updateStatus("error");
         setErrorMessage(data.error);
       } else if (data.status === "healthy" || data.status === "degraded") {
-        setStreamStatus("live");
+        updateStatus("live");
       } else if (data.status === "error") {
-        setStreamStatus("error");
+        updateStatus("error");
       }
     } catch {
       // Silently ignore polling errors
     }
-  }, [sessionId]);
+  }, [sessionId, updateStatus]);
 
   // Poll every 5 seconds when live
   useEffect(() => {
@@ -79,9 +95,15 @@ export function StreamControls({ sessionId }: Props) {
   }, [streamStatus, pollStatus]);
 
   async function handleStart() {
+    if (!activeKey) {
+      setErrorMessage("No stream key configured. Add one in your profile or enter one below.");
+      updateStatus("error");
+      return;
+    }
+
     setLoading(true);
     setErrorMessage(null);
-    setStreamStatus("connecting");
+    updateStatus("connecting");
     try {
       const res = await fetch("/api/stream", {
         method: "POST",
@@ -90,13 +112,13 @@ export function StreamControls({ sessionId }: Props) {
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok || data.error) {
-        setStreamStatus("error");
+        updateStatus("error");
         setErrorMessage(data.error ?? "Failed to start stream");
       } else {
-        setStreamStatus("live");
+        updateStatus("live");
       }
     } catch (err) {
-      setStreamStatus("error");
+      updateStatus("error");
       setErrorMessage(err instanceof Error ? err.message : "Network error");
     } finally {
       setLoading(false);
@@ -115,7 +137,7 @@ export function StreamControls({ sessionId }: Props) {
       if (!res.ok || data.error) {
         setErrorMessage(data.error ?? "Failed to stop stream");
       } else {
-        setStreamStatus("idle");
+        updateStatus("idle");
         setHealth(null);
         setErrorMessage(null);
       }
@@ -129,16 +151,20 @@ export function StreamControls({ sessionId }: Props) {
   const isLiveOrConnecting = streamStatus === "live" || streamStatus === "connecting";
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+        YouTube Streaming
+      </h2>
+
       {/* Status row */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center text-sm font-medium text-gray-300">
+      <div className="mt-3 flex items-center justify-between">
+        <div className="flex items-center text-sm font-medium text-zinc-300">
           <StatusDot status={streamStatus} />
           {statusLabel(streamStatus)}
         </div>
 
         {streamStatus === "live" && health && (
-          <div className="flex gap-4 text-xs text-gray-400">
+          <div className="flex gap-4 text-xs text-zinc-400">
             {health.fps !== undefined && (
               <span>{health.fps.toFixed(0)} fps</span>
             )}
@@ -149,31 +175,72 @@ export function StreamControls({ sessionId }: Props) {
         )}
       </div>
 
+      {/* Stream key section */}
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-zinc-500">Stream Key</p>
+        </div>
+
+        {savedStreamKey && !useOverrideKey && (
+          <div className="flex items-center justify-between rounded-lg bg-zinc-800 px-3 py-2">
+            <span className="font-mono text-sm text-zinc-400">
+              {maskKey(savedStreamKey)}
+            </span>
+            <span className="text-xs text-zinc-600">Saved key</span>
+          </div>
+        )}
+
+        {!savedStreamKey && !useOverrideKey && (
+          <p className="rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-500">
+            No saved key. Add one in Settings or enter below.
+          </p>
+        )}
+
+        <button
+          onClick={() => setUseOverrideKey(!useOverrideKey)}
+          className="text-xs text-emerald-400 hover:text-emerald-300"
+        >
+          {useOverrideKey ? "Use saved key" : "Use a different key"}
+        </button>
+
+        {useOverrideKey && (
+          <input
+            type="password"
+            placeholder="Enter stream key for this session"
+            value={overrideKey}
+            onChange={(e) => setOverrideKey(e.target.value)}
+            className="w-full rounded-lg bg-zinc-800 px-3 py-2 font-mono text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+        )}
+      </div>
+
       {/* Error message */}
       {errorMessage && (
-        <p className="text-xs text-red-400 bg-red-950/40 rounded-lg px-3 py-2">
+        <p className="mt-3 text-xs text-red-400 bg-red-950/40 rounded-lg px-3 py-2">
           {errorMessage}
         </p>
       )}
 
       {/* Action button */}
-      {!isLiveOrConnecting ? (
-        <button
-          onClick={handleStart}
-          disabled={loading}
-          className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm py-2 px-4 rounded-lg transition-colors"
-        >
-          {loading ? "Starting…" : "Start Stream"}
-        </button>
-      ) : (
-        <button
-          onClick={handleStop}
-          disabled={loading || streamStatus === "connecting"}
-          className="w-full bg-red-700 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm py-2 px-4 rounded-lg transition-colors"
-        >
-          {loading ? "Stopping…" : "End Stream"}
-        </button>
-      )}
+      <div className="mt-4">
+        {!isLiveOrConnecting ? (
+          <button
+            onClick={handleStart}
+            disabled={loading || !activeKey}
+            className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm py-3 px-4 rounded-lg transition-colors"
+          >
+            {loading ? "Starting..." : "Go Live on YouTube"}
+          </button>
+        ) : (
+          <button
+            onClick={handleStop}
+            disabled={loading || streamStatus === "connecting"}
+            className="w-full bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm py-3 px-4 rounded-lg transition-colors"
+          >
+            {loading ? "Stopping..." : "End Stream"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

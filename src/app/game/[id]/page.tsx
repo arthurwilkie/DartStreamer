@@ -30,6 +30,10 @@ import { BOT_PLAYER_ID, generateBotScore } from "@/lib/game/bot";
 import { calculateGameStatsForPlayer } from "@/lib/game/stats";
 import { shouldShowDartsAtDoublePopup, getDartsAtDoubleOptions } from "@/lib/game/checkouts";
 import { DartsAtDoublePopup } from "@/components/scoring/DartsAtDoublePopup";
+import { CameraStatusIcon } from "@/components/game/CameraStatusIcon";
+import { DeviceCameraPopup } from "@/components/game/DeviceCameraPopup";
+import { OpponentCameraFeed } from "@/components/game/OpponentCameraFeed";
+import { useSession } from "@/lib/session/SessionContext";
 
 interface GameRow {
   id: string;
@@ -69,7 +73,9 @@ export default function GamePage() {
   const [pendingCheckedOut, setPendingCheckedOut] = useState(false);
   const [dartsAtDoubleOptions, setDartsAtDoubleOptions] = useState<number[]>([]);
   const [showDartsAtDoublePopup, setShowDartsAtDoublePopup] = useState(false);
+  const [deviceCameraOpen, setDeviceCameraOpen] = useState(false);
 
+  const { opponentCameraStatus } = useSession();
   const supabase = createClient();
 
   const isBotGame = gameRow?.bot_level != null;
@@ -388,9 +394,30 @@ export default function GamePage() {
     : null;
   const canEdit = lastTurn?.playerId === userId && !isFinished;
 
+  // Should we show opponent camera feed?
+  const showOpponentCamera =
+    !isFinished &&
+    !isYourTurn &&
+    !isBotGame &&
+    opponentCameraStatus === "connected";
+
+  const opponentId = gameRow
+    ? gameRow.player1_id === userId
+      ? gameRow.player2_id
+      : gameRow.player1_id
+    : null;
+  const opponentName = opponentId ? playerNames[opponentId] ?? "Opponent" : "Opponent";
+
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="mx-auto max-w-md px-4 py-4">
+        {/* Camera status icon */}
+        {!isFinished && !isBotGame && (
+          <div className="flex justify-end">
+            <CameraStatusIcon onOpenDeviceCamera={() => setDeviceCameraOpen(true)} />
+          </div>
+        )}
+
         {/* Game finished: stats + turn history */}
         {isFinished && gameState && (() => {
           const p1Id = gameState.turns.length > 0
@@ -479,21 +506,27 @@ export default function GamePage() {
           )}
         </div>
 
-        {/* Score input */}
+        {/* Score input OR opponent camera feed */}
         {!isFinished && (
           <div className="mt-4">
-            {isX01State(gameState) && (
-              <DartInput
-                onSubmit={handleX01Submit}
-                remainingScore={gameState.scores[userId]}
-                disabled={!isYourTurn || submitting}
-              />
-            )}
-            {isCricketState(gameState) && (
-              <CricketInput
-                onSubmit={handleCricketSubmit}
-                disabled={!isYourTurn || submitting}
-              />
+            {showOpponentCamera ? (
+              <OpponentCameraFeed opponentName={opponentName} />
+            ) : (
+              <>
+                {isX01State(gameState) && (
+                  <DartInput
+                    onSubmit={handleX01Submit}
+                    remainingScore={gameState.scores[userId]}
+                    disabled={!isYourTurn || submitting}
+                  />
+                )}
+                {isCricketState(gameState) && (
+                  <CricketInput
+                    onSubmit={handleCricketSubmit}
+                    disabled={!isYourTurn || submitting}
+                  />
+                )}
+              </>
             )}
           </div>
         )}
@@ -522,6 +555,11 @@ export default function GamePage() {
           options={dartsAtDoubleOptions}
           checkedOut={pendingCheckedOut}
           onConfirm={handleDartsAtDoubleConfirm}
+        />
+
+        <DeviceCameraPopup
+          isOpen={deviceCameraOpen}
+          onClose={() => setDeviceCameraOpen(false)}
         />
       </div>
     </div>

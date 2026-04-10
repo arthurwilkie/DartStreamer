@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { type GameMode } from "@/lib/game/types";
 import { BOT_PLAYER_ID, BOT_LEVEL_NAMES } from "@/lib/game/bot";
+import { useSession } from "@/lib/session/SessionContext";
 
 const MODES: { value: GameMode; label: string; desc: string }[] = [
   { value: "501", label: "501", desc: "Single-In Double-Out" },
@@ -28,6 +29,51 @@ export default function NewGamePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [inviteSent, setInviteSent] = useState(false);
+  const { activeSession } = useSession();
+
+  // Listen for game invite acceptance — navigate to the created game
+  useEffect(() => {
+    if (!inviteSent || !userId) return;
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel("game-invite-response")
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "game_invites",
+          filter: `from_player_id=eq.${userId}`,
+        },
+        async (payload) => {
+          const row = payload.new as { status: string; id: string };
+          if (row.status === "accepted") {
+            // Find the game that was just created
+            const { data: games } = await supabase
+              .from("games")
+              .select("id")
+              .eq("player1_id", userId)
+              .eq("status", "active")
+              .order("created_at", { ascending: false })
+              .limit(1);
+
+            if (games && games.length > 0) {
+              router.push(`/game/${games[0].id}`);
+            }
+          } else if (row.status === "declined") {
+            setInviteSent(false);
+            setError("Your invite was declined.");
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [inviteSent, userId, router]);
 
   useEffect(() => {
     async function loadPlayers() {
@@ -54,34 +100,56 @@ export default function NewGamePage() {
     setLoading(true);
     setError(null);
 
-    const body: Record<string, unknown> = { mode: selectedMode };
-
     if (opponentType === "bot") {
-      body.botLevel = botLevel;
+      // Bot games are created directly
+      const res = await fetch("/api/games", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: selectedMode,
+          botLevel,
+          sessionId: activeSession?.id ?? null,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error);
+        setLoading(false);
+        return;
+      }
+
+      router.push(`/game/${data.id}`);
     } else {
+      // Human opponents get an invite
       if (!selectedPlayer) {
         setError("Select a player to challenge");
         setLoading(false);
         return;
       }
-      body.opponentId = selectedPlayer;
-    }
 
-    const res = await fetch("/api/games", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+      const res = await fetch("/api/invites/game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toPlayerId: selectedPlayer,
+          gameMode: selectedMode,
+          sessionId: activeSession?.id ?? null,
+        }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      setError(data.error);
+      if (!res.ok) {
+        setError(data.error);
+        setLoading(false);
+        return;
+      }
+
+      setInviteSent(true);
       setLoading(false);
-      return;
     }
-
-    router.push(`/game/${data.id}`);
   }
 
   return (
@@ -210,17 +278,42 @@ export default function NewGamePage() {
           </div>
         )}
 
-        <button
-          onClick={createGame}
-          disabled={loading || (opponentType === "player" && !selectedPlayer)}
-          className="mt-6 w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold transition-colors hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {loading
-            ? "Creating..."
-            : opponentType === "bot"
-            ? `Start vs DartBot (${botLevel})`
-            : "Start Game"}
-        </button>
+        {inviteSent ? (
+          <div className="mt-6 space-y-3">
+            <div className="flex items-center justify-center gap-2 rounded-xl bg-emerald-900/20 py-4">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+              <p className="text-sm font-medium text-emerald-300">
+                Invite sent! Waiting for{" "}
+                {players.find((p) => p.id === selectedPlayer)?.display_name ??
+                  "opponent"}
+                ...
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setInviteSent(false);
+                setSelectedPlayer(null);
+              }}
+              className="w-full rounded-xl border border-zinc-700 py-3 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-500"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={createGame}
+            disabled={loading || (opponentType === "player" && !selectedPlayer)}
+            className="mt-6 w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold transition-colors hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {loading
+              ? opponentType === "bot"
+                ? "Creating..."
+                : "Sending invite..."
+              : opponentType === "bot"
+              ? `Start vs DartBot (${botLevel})`
+              : "Send Game Invite"}
+          </button>
+        )}
       </div>
     </div>
   );

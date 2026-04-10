@@ -1,17 +1,29 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { validateCode } from "@/lib/pairing/codes";
 
 type PairingState = "setup" | "pairing" | "paired" | "error";
 
 export default function CameraPage() {
+  const searchParams = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [code, setCode] = useState("");
   const [state, setState] = useState<PairingState>("setup");
   const [errorMessage, setErrorMessage] = useState("");
   const [zoom, setZoom] = useState(1);
   const [cameraReady, setCameraReady] = useState(false);
+  const autoPairAttempted = useRef(false);
+
+  // Check for code in URL params (QR code scan flow)
+  useEffect(() => {
+    const urlCode = searchParams.get("code");
+    if (urlCode && validateCode(urlCode) && !autoPairAttempted.current) {
+      autoPairAttempted.current = true;
+      setCode(urlCode); // eslint-disable-line react-hooks/set-state-in-effect -- sync from URL param on mount
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -43,7 +55,7 @@ export default function CameraPage() {
     };
   }, []);
 
-  async function handlePair() {
+  const handlePair = useCallback(async () => {
     if (!validateCode(code)) {
       setErrorMessage("Please enter a valid 6-digit code.");
       setState("error");
@@ -72,6 +84,36 @@ export default function CameraPage() {
       setErrorMessage("Network error. Please try again.");
       setState("error");
     }
+  }, [code]);
+
+  // Auto-pair when camera is ready and code is from URL
+  useEffect(() => {
+    if (cameraReady && autoPairAttempted.current && code && state === "setup") {
+      void handlePair(); // eslint-disable-line react-hooks/set-state-in-effect -- auto-pair from URL on mount
+    }
+  }, [cameraReady, code, handlePair, state]);
+
+  async function handleDisconnect() {
+    try {
+      await fetch("/api/pairing", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+    } catch {
+      // Best-effort disconnect
+    }
+
+    // Stop camera tracks
+    if (videoRef.current?.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+
+    setCameraReady(false);
+    setCode("");
+    setState("setup");
   }
 
   function handleRetry() {
@@ -157,9 +199,17 @@ export default function CameraPage() {
         )}
 
         {state === "paired" && (
-          <div className="flex h-12 items-center justify-center gap-2">
-            <span className="h-3 w-3 rounded-full bg-emerald-400" />
-            <p className="font-semibold text-emerald-300">Camera paired and streaming</p>
+          <div className="space-y-3">
+            <div className="flex h-12 items-center justify-center gap-2">
+              <span className="h-3 w-3 rounded-full bg-emerald-400" />
+              <p className="font-semibold text-emerald-300">Camera paired and streaming</p>
+            </div>
+            <button
+              onClick={() => void handleDisconnect()}
+              className="h-12 w-full rounded-lg border border-red-700 font-medium text-red-400 transition-colors hover:bg-red-900/20"
+            >
+              Disconnect Camera
+            </button>
           </div>
         )}
 
