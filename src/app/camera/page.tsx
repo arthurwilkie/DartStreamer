@@ -105,11 +105,27 @@ function CameraPageInner() {
     return () => clearInterval(interval);
   }, [pairingCode, cameraState]);
 
-  // Notify server when camera disconnects (tab close or explicit disconnect)
+  // Heartbeat: ping server every 15s while paired so stream page can detect disconnect
   useEffect(() => {
     if (!pairingCode || cameraState !== "paired") return;
 
-    function handleBeforeUnload() {
+    // Send initial heartbeat immediately
+    void fetch("/api/pairing/heartbeat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: pairingCode }),
+    });
+
+    const interval = setInterval(() => {
+      void fetch("/api/pairing/heartbeat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: pairingCode }),
+      });
+    }, 15_000);
+
+    // Best-effort disconnect on tab close
+    function handlePageHide() {
       if (pairingCode) {
         navigator.sendBeacon(
           "/api/pairing/disconnect",
@@ -120,8 +136,12 @@ function CameraPageInner() {
       }
     }
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
   }, [pairingCode, cameraState]);
 
   async function handleDisconnect() {

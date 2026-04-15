@@ -165,6 +165,40 @@ export default function StreamPage() {
     };
   }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Detect camera disconnect via stale heartbeat
+  useEffect(() => {
+    if (externalStatus !== "connected" || !userId) return;
+
+    const interval = setInterval(async () => {
+      const { data } = await supabase
+        .from("camera_pairings")
+        .select("status, last_heartbeat")
+        .eq("player_id", userId)
+        .eq("status", "paired")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (!data || data.length === 0) {
+        // Pairing row gone or status changed — camera disconnected
+        setExternalStatus("disconnected");
+        setActiveCameraType("none");
+        return;
+      }
+
+      const heartbeat = data[0].last_heartbeat;
+      if (heartbeat) {
+        const age = Date.now() - new Date(heartbeat).getTime();
+        if (age > 30_000) {
+          // No heartbeat for 30s — camera is gone
+          setExternalStatus("disconnected");
+          setActiveCameraType("none");
+        }
+      }
+    }, 20_000);
+
+    return () => clearInterval(interval);
+  }, [externalStatus, userId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Subscribe to session invite responses
   useEffect(() => {
     if (!userId) return;
