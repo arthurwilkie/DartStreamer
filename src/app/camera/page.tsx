@@ -105,7 +105,39 @@ function CameraPageInner() {
     return () => clearInterval(interval);
   }, [pairingCode, cameraState]);
 
+  // Notify server when camera disconnects (tab close or explicit disconnect)
+  useEffect(() => {
+    if (!pairingCode || cameraState !== "paired") return;
+
+    function handleBeforeUnload() {
+      if (pairingCode) {
+        navigator.sendBeacon(
+          "/api/pairing/disconnect",
+          new Blob([JSON.stringify({ code: pairingCode })], {
+            type: "application/json",
+          })
+        );
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [pairingCode, cameraState]);
+
   async function handleDisconnect() {
+    // Notify server
+    if (pairingCode) {
+      try {
+        await fetch("/api/pairing/disconnect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: pairingCode }),
+        });
+      } catch {
+        // Best-effort
+      }
+    }
+
     // Stop camera tracks
     if (videoRef.current?.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;

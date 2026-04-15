@@ -133,35 +133,28 @@ export default function StreamPage() {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Subscribe to camera pairing changes for the active session
+  // Subscribe to camera pairing changes for the current user
   useEffect(() => {
-    if (!activeSession) return;
+    if (!userId) return;
 
     const channel = supabase
-      .channel(`camera-pairings:${activeSession.id}`)
+      .channel(`camera-pairings:${userId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "camera_pairings",
-          filter: `session_id=eq.${activeSession.id}`,
+          filter: `player_id=eq.${userId}`,
         },
         (payload) => {
           const row = payload.new as { player_id: string; status: string };
-          if (row.player_id === userId) {
-            if (row.status === "paired") {
-              setExternalStatus("connected");
-              setActiveCameraType("external");
-            } else if (row.status === "expired") {
-              setExternalStatus("disconnected");
-              setActiveCameraType("none");
-            }
-          } else {
-            // Opponent camera change
-            setOpponentCameraStatus(
-              row.status === "paired" ? "connected" : "disconnected"
-            );
+          if (row.status === "paired") {
+            setExternalStatus("connected");
+            setActiveCameraType("external");
+          } else if (row.status === "expired") {
+            setExternalStatus("disconnected");
+            setActiveCameraType("none");
           }
         }
       )
@@ -170,7 +163,7 @@ export default function StreamPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeSession?.id, userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Subscribe to session invite responses
   useEffect(() => {
