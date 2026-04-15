@@ -225,8 +225,6 @@ export default function StreamPage() {
   }, []);
 
   const handleClaimExternalCode = useCallback(async (code: string) => {
-    if (!activeSession) return;
-
     setExternalStatus("connecting");
     setActiveCameraType("external");
 
@@ -235,7 +233,7 @@ export default function StreamPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         code,
-        sessionId: activeSession.id,
+        sessionId: activeSession?.id ?? null,
       }),
     });
 
