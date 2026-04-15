@@ -1,6 +1,8 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { CameraPeer } from "@/lib/webrtc/peer";
 
 type CameraState = "loading" | "ready" | "paired" | "error";
 
@@ -20,21 +22,20 @@ export default function CameraPage() {
 
 function CameraPageInner() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const cameraPeerRef = useRef<CameraPeer | null>(null);
   const [cameraState, setCameraState] = useState<CameraState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [zoom, setZoom] = useState(1);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for future WebRTC signaling
-  const [_pairingId, setPairingId] = useState<string | null>(null);
+  const [pairingId, setPairingId] = useState<string | null>(null);
   const codeGenerated = useRef(false);
 
   // Start camera on mount
   useEffect(() => {
-    let stream: MediaStream | null = null;
-
     async function startCamera() {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "environment",
             width: { ideal: 1280 },
@@ -42,6 +43,7 @@ function CameraPageInner() {
           },
           audio: true,
         });
+        streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
@@ -55,7 +57,7 @@ function CameraPageInner() {
     void startCamera();
 
     return () => {
-      stream?.getTracks().forEach((t) => t.stop());
+      streamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
@@ -105,6 +107,20 @@ function CameraPageInner() {
     return () => clearInterval(interval);
   }, [pairingCode, cameraState]);
 
+  // Start WebRTC CameraPeer once paired
+  useEffect(() => {
+    if (cameraState !== "paired" || !pairingId || !streamRef.current) return;
+
+    const supabase = createClient();
+    const peer = new CameraPeer(supabase, pairingId, streamRef.current);
+    cameraPeerRef.current = peer;
+
+    return () => {
+      peer.destroy();
+      cameraPeerRef.current = null;
+    };
+  }, [cameraState, pairingId]);
+
   // Heartbeat: ping server every 15s while paired so stream page can detect disconnect
   useEffect(() => {
     if (!pairingCode || cameraState !== "paired") return;
@@ -145,6 +161,10 @@ function CameraPageInner() {
   }, [pairingCode, cameraState]);
 
   async function handleDisconnect() {
+    // Destroy WebRTC peer
+    cameraPeerRef.current?.destroy();
+    cameraPeerRef.current = null;
+
     // Notify server
     if (pairingCode) {
       try {
@@ -164,6 +184,7 @@ function CameraPageInner() {
       stream.getTracks().forEach((t) => t.stop());
       videoRef.current.srcObject = null;
     }
+    streamRef.current = null;
 
     setCameraState("loading");
     setPairingCode(null);
@@ -172,12 +193,13 @@ function CameraPageInner() {
   }
 
   function handleRetry() {
+    cameraPeerRef.current?.destroy();
+    cameraPeerRef.current = null;
     setErrorMessage("");
     setCameraState("loading");
     setPairingCode(null);
     setPairingId(null);
     codeGenerated.current = false;
-    // Re-trigger camera start
     window.location.reload();
   }
 
@@ -193,29 +215,31 @@ function CameraPageInner() {
         )}
       </div>
 
-      {/* Camera preview */}
-      <div className="relative flex-1 overflow-hidden bg-black">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="h-full w-full object-cover"
-          style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}
-        />
-        {cameraState === "loading" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
-            <p className="text-zinc-400">Starting camera&hellip;</p>
-          </div>
-        )}
-        {cameraState === "paired" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-            <div className="flex flex-col items-center gap-2">
-              <span className="h-4 w-4 rounded-full bg-emerald-400" />
-              <p className="text-lg font-semibold text-emerald-300">Connected</p>
+      {/* Camera preview — square crop */}
+      <div className="flex flex-1 items-center justify-center bg-black px-4 py-4">
+        <div className="relative aspect-square w-full max-w-md overflow-hidden rounded-xl bg-zinc-900">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="h-full w-full object-cover"
+            style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}
+          />
+          {cameraState === "loading" && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <p className="text-zinc-400">Starting camera&hellip;</p>
             </div>
-          </div>
-        )}
+          )}
+          {cameraState === "paired" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+              <div className="flex flex-col items-center gap-2">
+                <span className="h-4 w-4 rounded-full bg-emerald-400" />
+                <p className="text-lg font-semibold text-emerald-300">Connected</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Controls */}
@@ -267,6 +291,9 @@ function CameraPageInner() {
               <span className="h-3 w-3 rounded-full bg-emerald-400" />
               <p className="font-semibold text-emerald-300">Camera paired and streaming</p>
             </div>
+            <p className="text-center text-xs text-zinc-500">
+              Keep this tab open and in the foreground
+            </p>
             <button
               onClick={() => void handleDisconnect()}
               className="h-12 w-full rounded-lg border border-red-700 font-medium text-red-400 transition-colors hover:bg-red-900/20"

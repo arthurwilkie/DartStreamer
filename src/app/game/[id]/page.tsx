@@ -34,6 +34,7 @@ import { CameraStatusIcon } from "@/components/game/CameraStatusIcon";
 import { DeviceCameraPopup } from "@/components/game/DeviceCameraPopup";
 import { OpponentCameraFeed } from "@/components/game/OpponentCameraFeed";
 import { useSession } from "@/lib/session/SessionContext";
+import { ViewerPeer } from "@/lib/webrtc/peer";
 
 interface GameRow {
   id: string;
@@ -74,8 +75,12 @@ export default function GamePage() {
   const [dartsAtDoubleOptions, setDartsAtDoubleOptions] = useState<number[]>([]);
   const [showDartsAtDoublePopup, setShowDartsAtDoublePopup] = useState(false);
   const [deviceCameraOpen, setDeviceCameraOpen] = useState(false);
+  const [opponentPairingId, setOpponentPairingId] = useState<string | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [rtcState, setRtcState] = useState<RTCPeerConnectionState | "idle">("idle");
+  const viewerPeerRef = useRef<ViewerPeer | null>(null);
 
-  const { opponentCameraStatus } = useSession();
+  useSession(); // keep provider active for presence tracking
   const supabase = createClient();
 
   const isBotGame = gameRow?.bot_level != null;
@@ -192,6 +197,79 @@ export default function GamePage() {
       supabase.removeChannel(channel);
     };
   }, [gameRow?.id, userId, isBotGame]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Look up opponent's active camera pairing
+  useEffect(() => {
+    if (!gameRow || !userId || isBotGame) return;
+
+    const oppId =
+      gameRow.player1_id === userId ? gameRow.player2_id : gameRow.player1_id;
+
+    async function lookupPairing() {
+      const { data } = await supabase
+        .from("camera_pairings")
+        .select("id, status")
+        .eq("player_id", oppId)
+        .eq("status", "paired")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (data && data.length > 0) {
+        setOpponentPairingId(data[0].id);
+      }
+    }
+
+    void lookupPairing();
+
+    // Subscribe to opponent's pairing changes
+    const channel = supabase
+      .channel(`opp-camera:${oppId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "camera_pairings",
+          filter: `player_id=eq.${oppId}`,
+        },
+        (payload) => {
+          const row = payload.new as { id: string; status: string };
+          if (row.status === "paired") {
+            setOpponentPairingId(row.id);
+          } else {
+            setOpponentPairingId(null);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [gameRow?.id, userId, isBotGame]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Manage ViewerPeer lifecycle — create when opponent has a paired camera, destroy when not
+  useEffect(() => {
+    if (!opponentPairingId) return;
+
+    const peer = new ViewerPeer(supabase, opponentPairingId);
+    viewerPeerRef.current = peer;
+
+    peer.onStream = (stream) => {
+      setRemoteStream(stream);
+    };
+
+    peer.onConnectionState = (state) => {
+      setRtcState(state);
+    };
+
+    return () => {
+      peer.destroy();
+      viewerPeerRef.current = null;
+      setRemoteStream(null);
+      setRtcState("idle");
+    };
+  }, [opponentPairingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bot auto-play: submit a bot turn to the server and apply locally
   const playBotTurn = useCallback(
@@ -399,7 +477,7 @@ export default function GamePage() {
     !isFinished &&
     !isYourTurn &&
     !isBotGame &&
-    opponentCameraStatus === "connected";
+    opponentPairingId !== null;
 
   const opponentId = gameRow
     ? gameRow.player1_id === userId
@@ -510,7 +588,11 @@ export default function GamePage() {
         {!isFinished && (
           <div className="mt-4">
             {showOpponentCamera ? (
-              <OpponentCameraFeed opponentName={opponentName} />
+              <OpponentCameraFeed
+                opponentName={opponentName}
+                stream={remoteStream}
+                connectionState={rtcState}
+              />
             ) : (
               <>
                 {isX01State(gameState) && (

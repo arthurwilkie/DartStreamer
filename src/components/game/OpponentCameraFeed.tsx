@@ -1,37 +1,37 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 interface Props {
   opponentName: string;
-  signalingUrl?: string;
-  sessionId?: string;
+  stream: MediaStream | null;
+  connectionState: RTCPeerConnectionState | "idle";
 }
 
-export function OpponentCameraFeed({ opponentName, signalingUrl, sessionId }: Props) {
+export function OpponentCameraFeed({ opponentName, stream, connectionState }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [hasTrack, setHasTrack] = useState(false);
 
-  // In a full implementation, this would consume the opponent's mediasoup
-  // video track via the WebRTC client. For now, we show the video element
-  // that will be connected to the mediasoup consumer track.
   useEffect(() => {
-    if (!signalingUrl || !sessionId) return;
-    // TODO: Connect to mediasoup consumer for opponent's video track
-    // When track arrives: videoRef.current.srcObject = stream; setHasTrack(true);
-  }, [signalingUrl, sessionId]);
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  const hasVideo = stream !== null && connectionState === "connected";
+  const isConnecting =
+    connectionState === "connecting" || connectionState === "new";
 
   return (
     <div className="relative overflow-hidden rounded-xl bg-black">
-      <div className="aspect-video">
+      <div className="aspect-square">
         <video
           ref={videoRef}
           autoPlay
           playsInline
           className="h-full w-full object-cover"
         />
-        {/* Overlay when no video track yet */}
-        {!hasTrack && (
+        {/* Overlay when no video yet */}
+        {!hasVideo && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
             <svg
               className="h-10 w-10 text-zinc-600"
@@ -47,15 +47,22 @@ export function OpponentCameraFeed({ opponentName, signalingUrl, sessionId }: Pr
               />
             </svg>
             <p className="text-sm text-zinc-500">
-              Waiting for {opponentName}&apos;s camera...
+              {isConnecting
+                ? "Connecting to camera..."
+                : `Waiting for ${opponentName}'s camera...`}
             </p>
+            {isConnecting && (
+              <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-400" />
+            )}
           </div>
         )}
       </div>
       {/* Label */}
-      <div className="absolute bottom-2 left-2 rounded-md bg-black/60 px-2 py-1">
-        <p className="text-xs font-medium text-white">{opponentName}&apos;s board</p>
-      </div>
+      {hasVideo && (
+        <div className="absolute bottom-2 left-2 rounded-md bg-black/60 px-2 py-1">
+          <p className="text-xs font-medium text-white">{opponentName}&apos;s board</p>
+        </div>
+      )}
     </div>
   );
 }

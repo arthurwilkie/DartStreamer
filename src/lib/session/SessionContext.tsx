@@ -27,6 +27,7 @@ interface SessionState {
     external: CameraConnectionStatus;
   };
   opponentCameraStatus: CameraConnectionStatus;
+  opponentPairingId: string | null;
   streamStatus: StreamStatus;
   refreshSession: () => Promise<void>;
 }
@@ -36,6 +37,7 @@ const SessionContext = createContext<SessionState>({
   opponentName: null,
   cameraStatus: { device: "disconnected", external: "disconnected" },
   opponentCameraStatus: "disconnected",
+  opponentPairingId: null,
   streamStatus: "idle",
   refreshSession: async () => {},
 });
@@ -55,6 +57,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     external: "disconnected",
   });
   const [opponentCameraStatus, setOpponentCameraStatus] = useState<CameraConnectionStatus>("disconnected");
+  const [opponentPairingId, setOpponentPairingId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
 
   const loadSession = useCallback(async () => {
@@ -109,18 +112,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Check camera pairings
     const { data: pairings } = await supabase
       .from("camera_pairings")
-      .select("player_id, status")
+      .select("id, player_id, status")
       .eq("session_id", session.id)
       .eq("status", "paired");
 
     if (pairings) {
       const ownPaired = pairings.some((p) => p.player_id === user.id);
-      const oppPaired = pairings.some((p) => p.player_id !== user.id);
+      const oppPairing = pairings.find((p) => p.player_id !== user.id);
 
       if (ownPaired) {
         setCameraStatus((prev) => ({ ...prev, external: "connected" }));
       }
-      setOpponentCameraStatus(oppPaired ? "connected" : "disconnected");
+      setOpponentCameraStatus(oppPairing ? "connected" : "disconnected");
+      setOpponentPairingId(oppPairing?.id ?? null);
     }
   }, [supabase]);
 
@@ -160,7 +164,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           filter: `session_id=eq.${activeSession.id}`,
         },
         (payload) => {
-          const row = payload.new as { player_id: string; status: string };
+          const row = payload.new as { id: string; player_id: string; status: string };
           const isOwn = row.player_id === userId;
           const isPaired = row.status === "paired";
 
@@ -171,6 +175,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             }));
           } else {
             setOpponentCameraStatus(isPaired ? "connected" : "disconnected");
+            setOpponentPairingId(isPaired ? row.id : null);
           }
         }
       )
@@ -188,6 +193,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         opponentName,
         cameraStatus,
         opponentCameraStatus,
+        opponentPairingId,
         streamStatus,
         refreshSession: loadSession,
       }}
