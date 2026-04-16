@@ -69,17 +69,31 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setUserId(user.id);
 
     // Check own camera pairing immediately (independent of streaming session)
+    // Only consider pairings with a recent heartbeat (within 45s) as truly connected
+    const staleThreshold = new Date(Date.now() - 45_000).toISOString();
     const { data: ownPairings } = await supabase
       .from("camera_pairings")
-      .select("id, status")
+      .select("id, status, last_heartbeat")
       .eq("player_id", user.id)
       .eq("status", "paired")
+      .gt("last_heartbeat", staleThreshold)
       .limit(1);
 
+    const hasActivePairing = ownPairings && ownPairings.length > 0;
     setCameraStatus((prev) => ({
       ...prev,
-      external: ownPairings && ownPairings.length > 0 ? "connected" : "disconnected",
+      external: hasActivePairing ? "connected" : "disconnected",
     }));
+
+    // Clean up stale pairings (paired but heartbeat expired)
+    if (!hasActivePairing) {
+      void supabase
+        .from("camera_pairings")
+        .update({ status: "disconnected" })
+        .eq("player_id", user.id)
+        .eq("status", "paired")
+        .lte("last_heartbeat", staleThreshold);
+    }
 
     // Find active session
     const { data: sessions } = await supabase
