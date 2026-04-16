@@ -239,9 +239,8 @@ export class ViewerPeer {
       this.createPc();
     }
 
-    // Add transceiver to receive video (and audio if available)
+    // Add transceiver to receive video only (audio not needed — players use Discord)
     this.pc.addTransceiver("video", { direction: "recvonly" });
-    this.pc.addTransceiver("audio", { direction: "recvonly" });
 
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);

@@ -41,7 +41,7 @@ function CameraPageInner() {
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
-          audio: true,
+          audio: false,
         });
         streamRef.current = stream;
         if (videoRef.current) {

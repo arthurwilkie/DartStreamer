@@ -28,6 +28,7 @@ export function OpponentCameraFeed({ opponentName, stream, connectionState }: Pr
           ref={videoRef}
           autoPlay
           playsInline
+          muted
           className="h-full w-full object-cover"
         />
         {/* Overlay when no video yet */}
