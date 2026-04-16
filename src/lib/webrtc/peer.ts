@@ -97,25 +97,29 @@ export class CameraPeer {
  * Creates an offer and sends it to the CameraPeer, then plays the remote stream.
  */
 export class ViewerPeer {
-  private pc: RTCPeerConnection;
+  private pc!: RTCPeerConnection;
   private channel: ReturnType<SupabaseClient["channel"]>;
   private destroyed = false;
   private pendingCandidates: RTCIceCandidateInit[] = [];
+  private answerReceived = false;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryCount = 0;
+  private static MAX_RETRIES = 5;
+  private static RETRY_INTERVAL_MS = 3000;
 
   onStream: ((stream: MediaStream) => void) | null = null;
   onConnectionState: ((state: RTCPeerConnectionState) => void) | null = null;
 
   constructor(
-    supabase: SupabaseClient,
+    private supabase: SupabaseClient,
     private pairingId: string
   ) {
-    this.pc = new RTCPeerConnection({ iceServers: getIceServers() });
     this.channel = supabase.channel(`webrtc-signal:${pairingId}`);
     this.init();
   }
 
-  private init() {
-    const pc = this.pc;
+  private createPc() {
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
 
     // Receive remote tracks
     pc.ontrack = (e) => {
@@ -142,6 +146,12 @@ export class ViewerPeer {
       }
     };
 
+    this.pc = pc;
+  }
+
+  private init() {
+    this.createPc();
+
     // Listen for signals from camera
     this.channel
       .on("broadcast", { event: "signal" }, ({ payload }) => {
@@ -151,12 +161,22 @@ export class ViewerPeer {
       })
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
-          await this.createOffer();
+          await this.sendOffer();
         }
       });
   }
 
-  private async createOffer() {
+  private async sendOffer() {
+    // Reset PC for a fresh offer
+    if (this.retryCount > 0) {
+      this.pc.ontrack = null;
+      this.pc.onicecandidate = null;
+      this.pc.onconnectionstatechange = null;
+      this.pc.close();
+      this.pendingCandidates = [];
+      this.createPc();
+    }
+
     // Add transceiver to receive video (and audio if available)
     this.pc.addTransceiver("video", { direction: "recvonly" });
     this.pc.addTransceiver("audio", { direction: "recvonly" });
@@ -169,10 +189,32 @@ export class ViewerPeer {
       event: "signal",
       payload: { type: "offer", sdp: offer.sdp },
     });
+
+    // Schedule retry if no answer received
+    this.scheduleRetry();
+  }
+
+  private scheduleRetry() {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+
+    this.retryTimer = setTimeout(() => {
+      if (this.destroyed || this.answerReceived) return;
+
+      this.retryCount++;
+      if (this.retryCount <= ViewerPeer.MAX_RETRIES) {
+        void this.sendOffer();
+      }
+    }, ViewerPeer.RETRY_INTERVAL_MS);
   }
 
   private async handleSignal(msg: SignalMessage) {
     if (msg.type === "answer") {
+      this.answerReceived = true;
+      if (this.retryTimer) {
+        clearTimeout(this.retryTimer);
+        this.retryTimer = null;
+      }
+
       await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
       // Flush any ICE candidates that arrived before the answer
       for (const candidate of this.pendingCandidates) {
@@ -192,6 +234,10 @@ export class ViewerPeer {
 
   destroy() {
     this.destroyed = true;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
     this.pc.ontrack = null;
     this.pc.onicecandidate = null;
     this.pc.onconnectionstatechange = null;

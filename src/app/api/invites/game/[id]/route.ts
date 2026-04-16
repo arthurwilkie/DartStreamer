@@ -46,17 +46,7 @@ export async function PATCH(
     );
   }
 
-  // Update invite status
-  const { error } = await supabase
-    .from("game_invites")
-    .update({ status })
-    .eq("id", id);
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // If accepted, create the game
+  // If accepted, create the game first — only mark invite accepted if game creation succeeds
   if (status === "accepted") {
     const { data: game, error: gameError } = await supabase
       .from("games")
@@ -76,7 +66,26 @@ export async function PATCH(
       return NextResponse.json({ error: gameError.message }, { status: 500 });
     }
 
+    const { error } = await supabase
+      .from("game_invites")
+      .update({ status })
+      .eq("id", id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
     return NextResponse.json({ id, status, gameId: game.id });
+  }
+
+  // Declined — just update the invite
+  const { error } = await supabase
+    .from("game_invites")
+    .update({ status })
+    .eq("id", id);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ id, status });

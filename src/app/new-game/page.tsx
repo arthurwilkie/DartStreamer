@@ -48,13 +48,14 @@ export default function NewGamePage() {
           filter: `from_player_id=eq.${userId}`,
         },
         async (payload) => {
-          const row = payload.new as { status: string; id: string };
+          const row = payload.new as { status: string; id: string; to_player_id: string };
           if (row.status === "accepted") {
-            // Find the game that was just created
+            // Find the game created for this specific invite (both players must match)
             const { data: games } = await supabase
               .from("games")
               .select("id")
               .eq("player1_id", userId)
+              .eq("player2_id", row.to_player_id)
               .eq("status", "active")
               .order("created_at", { ascending: false })
               .limit(1);
