@@ -109,23 +109,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setOpponentName(opponent?.display_name ?? null);
     }
 
-    // Check camera pairings
-    const { data: pairings } = await supabase
+    // Check own camera pairing (by player_id, not session_id — works without a streaming session)
+    const { data: ownPairings } = await supabase
       .from("camera_pairings")
-      .select("id, player_id, status")
-      .eq("session_id", session.id)
-      .eq("status", "paired");
+      .select("id, status")
+      .eq("player_id", user.id)
+      .eq("status", "paired")
+      .limit(1);
 
-    if (pairings) {
-      const ownPaired = pairings.some((p) => p.player_id === user.id);
-      const oppPairing = pairings.find((p) => p.player_id !== user.id);
-
-      if (ownPaired) {
-        setCameraStatus((prev) => ({ ...prev, external: "connected" }));
-      }
-      setOpponentCameraStatus(oppPairing ? "connected" : "disconnected");
-      setOpponentPairingId(oppPairing?.id ?? null);
-    }
+    setCameraStatus((prev) => ({
+      ...prev,
+      external: ownPairings && ownPairings.length > 0 ? "connected" : "disconnected",
+    }));
   }, [supabase]);
 
   // Initial load
@@ -155,28 +150,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           );
         }
       )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeSession?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Subscribe to own camera pairing changes (independent of session)
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel(`camera-ctx:${userId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "camera_pairings",
-          filter: `session_id=eq.${activeSession.id}`,
+          filter: `player_id=eq.${userId}`,
         },
         (payload) => {
-          const row = payload.new as { id: string; player_id: string; status: string };
-          const isOwn = row.player_id === userId;
-          const isPaired = row.status === "paired";
-
-          if (isOwn) {
-            setCameraStatus((prev) => ({
-              ...prev,
-              external: isPaired ? "connected" : "disconnected",
-            }));
-          } else {
-            setOpponentCameraStatus(isPaired ? "connected" : "disconnected");
-            setOpponentPairingId(isPaired ? row.id : null);
-          }
+          const row = payload.new as { id: string; status: string };
+          setCameraStatus((prev) => ({
+            ...prev,
+            external: row.status === "paired" ? "connected" : "disconnected",
+          }));
         }
       )
       .subscribe();
@@ -184,7 +184,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeSession?.id, userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <SessionContext.Provider
