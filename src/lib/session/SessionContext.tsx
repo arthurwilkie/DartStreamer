@@ -68,6 +68,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (!user) return;
     setUserId(user.id);
 
+    // Check own camera pairing immediately (independent of streaming session)
+    const { data: ownPairings } = await supabase
+      .from("camera_pairings")
+      .select("id, status")
+      .eq("player_id", user.id)
+      .eq("status", "paired")
+      .limit(1);
+
+    setCameraStatus((prev) => ({
+      ...prev,
+      external: ownPairings && ownPairings.length > 0 ? "connected" : "disconnected",
+    }));
+
     // Find active session
     const { data: sessions } = await supabase
       .from("sessions")
@@ -109,18 +122,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setOpponentName(opponent?.display_name ?? null);
     }
 
-    // Check own camera pairing (by player_id, not session_id — works without a streaming session)
-    const { data: ownPairings } = await supabase
-      .from("camera_pairings")
-      .select("id, status")
-      .eq("player_id", user.id)
-      .eq("status", "paired")
-      .limit(1);
-
-    setCameraStatus((prev) => ({
-      ...prev,
-      external: ownPairings && ownPairings.length > 0 ? "connected" : "disconnected",
-    }));
   }, [supabase]);
 
   // Initial load
