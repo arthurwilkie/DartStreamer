@@ -17,7 +17,45 @@ export async function POST(
   }
 
   const body = await request.json();
-  const { scoreEntered, dartsDetail, roundNumber, playerId, dartsAtDouble, dartsForCheckout } = body;
+  const {
+    scoreEntered,
+    dartsDetail,
+    roundNumber,
+    playerId,
+    dartsAtDouble,
+    dartsForCheckout,
+    legNumber,
+    setNumber,
+    legEnded,
+    legWinnerId,
+    setEnded,
+    setWinnerId,
+    matchOver,
+    matchWinnerId,
+    nextPlayerId,
+    nextRound,
+    nextLeg,
+    nextSet,
+  } = body as {
+    scoreEntered: number;
+    dartsDetail: unknown[];
+    roundNumber: number;
+    playerId?: string;
+    dartsAtDouble?: number;
+    dartsForCheckout?: number;
+    legNumber?: number;
+    setNumber?: number;
+    legEnded?: boolean;
+    legWinnerId?: string;
+    setEnded?: boolean;
+    setWinnerId?: string;
+    matchOver?: boolean;
+    matchWinnerId?: string;
+    nextPlayerId?: string;
+    nextRound?: number;
+    nextLeg?: number;
+    nextSet?: number;
+  };
 
   // Verify game exists and is active
   const { data: game } = await supabase
@@ -61,6 +99,8 @@ export async function POST(
       game_id: gameId,
       player_id: turnPlayerId,
       round_number: roundNumber,
+      leg_number: legNumber ?? game.current_leg ?? 1,
+      set_number: setNumber ?? game.current_set ?? 1,
       score_entered: scoreEntered,
       darts_detail: dartsDetail,
       ...(dartsAtDouble != null ? { darts_at_double: dartsAtDouble } : {}),
@@ -73,19 +113,43 @@ export async function POST(
     return NextResponse.json({ error: turnError.message }, { status: 500 });
   }
 
-  // Switch turns
+  // Update game state: client computed leg/set/match transitions via engine
   const otherPlayerId =
     game.player1_id === turnPlayerId ? game.player2_id : game.player1_id;
   const isPlayer2 = turnPlayerId === game.player2_id;
-  const newRound = isPlayer2 ? game.current_round + 1 : game.current_round;
+  const defaultNextRound = isPlayer2 ? game.current_round + 1 : game.current_round;
 
-  await supabase
-    .from("games")
-    .update({
-      current_player_id: otherPlayerId,
-      current_round: newRound,
-    })
-    .eq("id", gameId);
+  const updates: Record<string, unknown> = {
+    current_player_id: nextPlayerId ?? otherPlayerId,
+    current_round: nextRound ?? defaultNextRound,
+  };
+
+  if (nextLeg != null) updates.current_leg = nextLeg;
+  if (nextSet != null) updates.current_set = nextSet;
+
+  if (legEnded && legWinnerId) {
+    const legField =
+      legWinnerId === game.player1_id ? "player1_legs" : "player2_legs";
+    updates[legField] = (game[legField] ?? 0) + 1;
+    if (setEnded) {
+      // Reset legs for the new set
+      updates.player1_legs = 0;
+      updates.player2_legs = 0;
+    }
+  }
+
+  if (setEnded && setWinnerId) {
+    const setField =
+      setWinnerId === game.player1_id ? "player1_sets" : "player2_sets";
+    updates[setField] = (game[setField] ?? 0) + 1;
+  }
+
+  if (matchOver && matchWinnerId) {
+    updates.status = "finished";
+    updates.winner_id = matchWinnerId;
+  }
+
+  await supabase.from("games").update(updates).eq("id", gameId);
 
   return NextResponse.json(turn);
 }

@@ -3,14 +3,29 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { type GameMode } from "@/lib/game/types";
+import { type GameMode, type MatchFormat, type InMode, type OutMode } from "@/lib/game/types";
 import { BOT_PLAYER_ID, BOT_LEVEL_NAMES } from "@/lib/game/bot";
 import { useSession } from "@/lib/session/SessionContext";
 
-const MODES: { value: GameMode; label: string; desc: string }[] = [
-  { value: "501", label: "501", desc: "Single-In Double-Out" },
-  { value: "301", label: "301", desc: "Double-In Double-Out" },
-  { value: "cricket", label: "Cricket", desc: "Close 15-20 & Bull" },
+type ScoreVariant = "301" | "501" | "701" | "custom";
+
+const SCORE_VARIANTS: { value: ScoreVariant; label: string }[] = [
+  { value: "301", label: "301" },
+  { value: "501", label: "501" },
+  { value: "701", label: "701" },
+  { value: "custom", label: "Custom" },
+];
+
+const IN_MODES: { value: InMode; label: string }[] = [
+  { value: "straight", label: "Straight" },
+  { value: "double", label: "Double" },
+  { value: "master", label: "Master" },
+];
+
+const OUT_MODES: { value: OutMode; label: string }[] = [
+  { value: "straight", label: "Straight" },
+  { value: "double", label: "Double" },
+  { value: "master", label: "Master" },
 ];
 
 interface PlayerInfo {
@@ -21,7 +36,13 @@ interface PlayerInfo {
 
 export default function NewGamePage() {
   const router = useRouter();
-  const [selectedMode, setSelectedMode] = useState<GameMode>("501");
+  const [gameType, setGameType] = useState<"x01" | "cricket">("x01");
+  const [scoreVariant, setScoreVariant] = useState<ScoreVariant>("501");
+  const [customScore, setCustomScore] = useState(501);
+  const [matchFormat, setMatchFormat] = useState<MatchFormat>("legs");
+  const [target, setTarget] = useState(1);
+  const [inMode, setInMode] = useState<InMode>("straight");
+  const [outMode, setOutMode] = useState<OutMode>("double");
   const [opponentType, setOpponentType] = useState<"bot" | "player">("bot");
   const [botLevel, setBotLevel] = useState(4);
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
@@ -50,7 +71,6 @@ export default function NewGamePage() {
         async (payload) => {
           const row = payload.new as { status: string; id: string; to_player_id: string };
           if (row.status === "accepted") {
-            // Find the game created for this specific invite (both players must match)
             const { data: games } = await supabase
               .from("games")
               .select("id")
@@ -97,57 +117,70 @@ export default function NewGamePage() {
     loadPlayers();
   }, []);
 
+  function computeGameMode(): GameMode {
+    if (gameType === "cricket") return "cricket";
+    if (scoreVariant === "custom") return "custom";
+    return scoreVariant as GameMode;
+  }
+
+  function computeStartingScore(): number | undefined {
+    if (gameType === "cricket") return undefined;
+    if (scoreVariant === "custom") return customScore;
+    return parseInt(scoreVariant);
+  }
+
   async function createGame() {
     setLoading(true);
     setError(null);
 
+    const mode = computeGameMode();
+    const startingScore = computeStartingScore();
+
+    const payload: Record<string, unknown> = {
+      mode,
+      sessionId: activeSession?.id ?? null,
+      matchFormat,
+      target,
+    };
+    if (gameType === "x01") {
+      payload.startingScore = startingScore;
+      payload.inMode = inMode;
+      payload.outMode = outMode;
+    }
+
     if (opponentType === "bot") {
-      // Bot games are created directly
+      payload.botLevel = botLevel;
       const res = await fetch("/api/games", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: selectedMode,
-          botLevel,
-          sessionId: activeSession?.id ?? null,
-        }),
+        body: JSON.stringify(payload),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
         setError(data.error);
         setLoading(false);
         return;
       }
-
       router.push(`/game/${data.id}`);
     } else {
-      // Human opponents get an invite
       if (!selectedPlayer) {
         setError("Select a player to challenge");
         setLoading(false);
         return;
       }
-
+      payload.toPlayerId = selectedPlayer;
+      payload.gameMode = mode;
       const res = await fetch("/api/invites/game", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toPlayerId: selectedPlayer,
-          gameMode: selectedMode,
-          sessionId: activeSession?.id ?? null,
-        }),
+        body: JSON.stringify(payload),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
         setError(data.error);
         setLoading(false);
         return;
       }
-
       setInviteSent(true);
       setLoading(false);
     }
@@ -166,23 +199,143 @@ export default function NewGamePage() {
           </button>
         </div>
 
-        {/* Game mode selection */}
-        <p className="mt-4 text-sm text-zinc-400">Game mode</p>
-        <div className="mt-2 grid grid-cols-3 gap-2">
-          {MODES.map((mode) => (
+        {/* Game type */}
+        <p className="mt-4 text-sm text-zinc-400">Game type</p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button
+            onClick={() => setGameType("x01")}
+            className={`rounded-xl p-3 text-center transition-colors ${
+              gameType === "x01"
+                ? "bg-emerald-900/30 ring-2 ring-emerald-500"
+                : "bg-zinc-800 hover:bg-zinc-700"
+            }`}
+          >
+            <div className="text-lg font-bold">X01</div>
+            <div className="text-xs text-zinc-400">301 / 501 / 701</div>
+          </button>
+          <button
+            onClick={() => setGameType("cricket")}
+            className={`rounded-xl p-3 text-center transition-colors ${
+              gameType === "cricket"
+                ? "bg-emerald-900/30 ring-2 ring-emerald-500"
+                : "bg-zinc-800 hover:bg-zinc-700"
+            }`}
+          >
+            <div className="text-lg font-bold">Cricket</div>
+            <div className="text-xs text-zinc-400">Close 15-20 &amp; Bull</div>
+          </button>
+        </div>
+
+        {/* X01-specific: score variant, in/out modes */}
+        {gameType === "x01" && (
+          <>
+            <p className="mt-4 text-sm text-zinc-400">Score</p>
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              {SCORE_VARIANTS.map((v) => (
+                <button
+                  key={v.value}
+                  onClick={() => setScoreVariant(v.value)}
+                  className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
+                    scoreVariant === v.value
+                      ? "bg-emerald-900/30 ring-2 ring-emerald-500"
+                      : "bg-zinc-800 hover:bg-zinc-700"
+                  }`}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+
+            {scoreVariant === "custom" && (
+              <div className="mt-2">
+                <input
+                  type="number"
+                  min={2}
+                  value={customScore}
+                  onChange={(e) => setCustomScore(parseInt(e.target.value) || 0)}
+                  className="w-full rounded-lg bg-zinc-800 px-3 py-2 text-white outline-none ring-emerald-500 focus:ring-2"
+                />
+              </div>
+            )}
+
+            <p className="mt-4 text-sm text-zinc-400">In mode</p>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {IN_MODES.map((m) => (
+                <button
+                  key={m.value}
+                  onClick={() => setInMode(m.value)}
+                  className={`rounded-lg py-2 text-sm transition-colors ${
+                    inMode === m.value
+                      ? "bg-emerald-900/30 ring-2 ring-emerald-500"
+                      : "bg-zinc-800 hover:bg-zinc-700"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-4 text-sm text-zinc-400">Out mode</p>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {OUT_MODES.map((m) => (
+                <button
+                  key={m.value}
+                  onClick={() => setOutMode(m.value)}
+                  className={`rounded-lg py-2 text-sm transition-colors ${
+                    outMode === m.value
+                      ? "bg-emerald-900/30 ring-2 ring-emerald-500"
+                      : "bg-zinc-800 hover:bg-zinc-700"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Match format */}
+        <p className="mt-4 text-sm text-zinc-400">Match format</p>
+        <div className="mt-2 flex rounded-lg bg-zinc-800 p-1">
+          <button
+            onClick={() => setMatchFormat("legs")}
+            className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
+              matchFormat === "legs" ? "bg-zinc-700 text-white" : "text-zinc-400"
+            }`}
+          >
+            Best of X Legs
+          </button>
+          <button
+            onClick={() => setMatchFormat("sets")}
+            className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
+              matchFormat === "sets" ? "bg-zinc-700 text-white" : "text-zinc-400"
+            }`}
+          >
+            First to X Sets
+          </button>
+        </div>
+        <div className="mt-3 flex items-center justify-between">
+          <span className="text-sm text-zinc-400">
+            {matchFormat === "legs" ? "Best of" : "First to"}
+          </span>
+          <div className="flex items-center gap-3">
             <button
-              key={mode.value}
-              onClick={() => setSelectedMode(mode.value)}
-              className={`rounded-xl p-3 text-center transition-colors ${
-                selectedMode === mode.value
-                  ? "bg-emerald-900/30 ring-2 ring-emerald-500"
-                  : "bg-zinc-800 hover:bg-zinc-700"
-              }`}
+              onClick={() => setTarget((t) => Math.max(1, t - (matchFormat === "legs" ? 2 : 1)))}
+              className="h-9 w-9 rounded-full bg-zinc-800 text-xl leading-none hover:bg-zinc-700"
             >
-              <div className="text-lg font-bold">{mode.label}</div>
-              <div className="text-xs text-zinc-400">{mode.desc}</div>
+              −
             </button>
-          ))}
+            <span className="w-12 text-center text-2xl font-bold">{target}</span>
+            <button
+              onClick={() => setTarget((t) => t + (matchFormat === "legs" ? 2 : 1))}
+              className="h-9 w-9 rounded-full bg-zinc-800 text-xl leading-none hover:bg-zinc-700"
+            >
+              +
+            </button>
+            <span className="text-sm text-zinc-500">
+              {matchFormat === "legs" ? "legs" : "sets"}
+            </span>
+          </div>
         </div>
 
         {/* Opponent type tabs */}
@@ -209,7 +362,6 @@ export default function NewGamePage() {
           </button>
         </div>
 
-        {/* Bot settings */}
         {opponentType === "bot" && (
           <div className="mt-4">
             <div className="flex items-center justify-between">
@@ -234,7 +386,6 @@ export default function NewGamePage() {
           </div>
         )}
 
-        {/* Player selection */}
         {opponentType === "player" && (
           <div className="mt-4">
             <p className="text-sm text-zinc-400">Select opponent</p>

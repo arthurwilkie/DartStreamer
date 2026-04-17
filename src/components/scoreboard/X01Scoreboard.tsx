@@ -22,13 +22,39 @@ export function X01Scoreboard({ state, playerNames, currentUserId }: X01Scoreboa
     return { threeDartAvg, lastScore, dartsThrown: totalDarts };
   }
 
+  const inLabel =
+    state.inMode === "double"
+      ? "DI"
+      : state.inMode === "master"
+      ? "MI"
+      : "SI";
+  const outLabel =
+    state.outMode === "double"
+      ? "DO"
+      : state.outMode === "master"
+      ? "MO"
+      : "SO";
+
+  const matchLabel =
+    state.matchFormat === "sets"
+      ? `First to ${Math.ceil(state.target / 2)} sets`
+      : `Best of ${state.target} legs`;
+
   return (
     <div className="rounded-xl bg-zinc-900 p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
-          {state.mode} {state.mode === "501" ? "SIDO" : "DIDO"}
+          {state.mode} {inLabel}
+          {outLabel}
         </h2>
-        <span className="text-sm text-zinc-500">Round {state.currentRound}</span>
+        <span className="text-xs text-zinc-500">{matchLabel}</span>
+      </div>
+      <div className="mb-3 flex items-center justify-between text-xs text-zinc-500">
+        <span>
+          {state.matchFormat === "sets" ? `Set ${state.currentSet} · ` : ""}
+          Leg {state.currentLeg}
+        </span>
+        <span>Round {state.currentRound}</span>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -56,11 +82,23 @@ export function X01Scoreboard({ state, playerNames, currentUserId }: X01Scoreboa
                   <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
                 )}
               </div>
+              <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+                {state.matchFormat === "sets" && (
+                  <span>
+                    Sets <span className="font-bold text-white">{state.setsWon[playerId] ?? 0}</span>
+                  </span>
+                )}
+                <span>
+                  Legs <span className="font-bold text-white">{state.legsWon[playerId] ?? 0}</span>
+                </span>
+              </div>
               <div className="mt-1 text-4xl font-bold text-white">
                 {remaining}
               </div>
-              {state.mode === "301" && !state.hasDoubledIn[playerId] && (
-                <span className="text-xs text-amber-400">Needs double-in</span>
+              {state.inMode !== "straight" && !state.hasDoubledIn[playerId] && (
+                <span className="text-xs text-amber-400">
+                  Needs {state.inMode === "double" ? "double" : "double/triple"}-in
+                </span>
               )}
               {checkout && remaining <= 170 && (
                 <span className="mt-1 block text-xs text-zinc-500">

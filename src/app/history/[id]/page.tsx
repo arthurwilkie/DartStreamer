@@ -71,6 +71,8 @@ export default async function MatchDetailPage({
     gameId: t.game_id,
     playerId: t.player_id,
     roundNumber: t.round_number,
+    legNumber: t.leg_number ?? 1,
+    setNumber: t.set_number ?? 1,
     scoreEntered: t.score_entered,
     dartsDetail: t.darts_detail as Dart[] | CricketDart[],
     isEdited: t.is_edited,

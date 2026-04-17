@@ -38,10 +38,24 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { toPlayerId, gameMode, sessionId } = body as {
+  const {
+    toPlayerId,
+    gameMode,
+    sessionId,
+    matchFormat,
+    target,
+    startingScore,
+    inMode,
+    outMode,
+  } = body as {
     toPlayerId: string;
     gameMode: string;
     sessionId?: string;
+    matchFormat?: "legs" | "sets";
+    target?: number;
+    startingScore?: number;
+    inMode?: "straight" | "double" | "master";
+    outMode?: "straight" | "double" | "master";
   };
 
   if (!toPlayerId || !gameMode) {
@@ -51,12 +65,27 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!["501", "301", "cricket"].includes(gameMode)) {
+  if (!["501", "301", "701", "cricket", "custom"].includes(gameMode)) {
     return NextResponse.json(
       { error: "Invalid game mode" },
       { status: 400 }
     );
   }
+
+  const defaultStartingScore =
+    gameMode === "301"
+      ? 301
+      : gameMode === "701"
+      ? 701
+      : gameMode === "custom"
+      ? (startingScore ?? 501)
+      : 501;
+  const invStartingScore =
+    gameMode === "cricket" ? null : (startingScore ?? defaultStartingScore);
+  const invInMode = inMode ?? (gameMode === "301" ? "double" : "straight");
+  const invOutMode = outMode ?? "double";
+  const invMatchFormat = matchFormat ?? "legs";
+  const invTarget = target ?? 1;
 
   if (toPlayerId === user.id) {
     return NextResponse.json(
@@ -73,6 +102,11 @@ export async function POST(request: Request) {
       game_mode: gameMode,
       session_id: sessionId ?? null,
       status: "pending",
+      match_format: invMatchFormat,
+      target: invTarget,
+      starting_score: invStartingScore,
+      in_mode: invInMode,
+      out_mode: invOutMode,
     })
     .select()
     .single();

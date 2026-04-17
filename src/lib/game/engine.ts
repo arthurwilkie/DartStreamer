@@ -20,6 +20,8 @@ export function createGameState(config: GameConfig): GameState {
   switch (config.mode) {
     case "501":
     case "301":
+    case "701":
+    case "custom":
       return createX01State(config);
     case "cricket":
       return createCricketState(config);
@@ -53,10 +55,8 @@ export function applyScoreTurn(
 
 export function isGameOver(state: GameState): { over: boolean; winnerId?: string } {
   if (isX01State(state)) {
-    for (const [playerId, score] of Object.entries(state.scores)) {
-      if (score === 0) {
-        return { over: true, winnerId: playerId };
-      }
+    if (state.matchWinnerId) {
+      return { over: true, winnerId: state.matchWinnerId };
     }
     return { over: false };
   }

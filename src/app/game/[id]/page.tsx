@@ -46,6 +46,14 @@ interface GameRow {
   status: string;
   winner_id: string | null;
   bot_level: number | null;
+  match_format: "legs" | "sets";
+  target: number;
+  starting_score: number | null;
+  in_mode: "straight" | "double" | "master";
+  out_mode: "straight" | "double" | "master";
+  current_leg: number;
+  current_set: number;
+  leg_starter_id: string | null;
 }
 
 interface TurnRow {
@@ -140,6 +148,12 @@ export default function GamePage() {
         mode: game.mode as GameMode,
         player1Id: game.player1_id,
         player2Id: game.player2_id,
+        startingScore: game.starting_score ?? undefined,
+        inMode: game.in_mode,
+        outMode: game.out_mode,
+        matchFormat: game.match_format,
+        target: game.target,
+        legStarterId: game.leg_starter_id ?? game.player1_id,
       };
 
       let state = createGameState(config);
@@ -282,14 +296,14 @@ export default function GamePage() {
       const botScore = generateBotScore(botLevel, botRemaining);
 
       // Apply locally
-      const { newState } = applyScoreTurn(currentState, BOT_PLAYER_ID, botScore);
+      const { newState, result } = applyScoreTurn(currentState, BOT_PLAYER_ID, botScore);
 
       const scoreEntered = botScore;
-      // Recompute for bust: if the score caused a bust, scoreEntered in the turn is 0
       const newX01State = newState as import("@/lib/game/types").X01GameState;
       const actualRemaining = newX01State.scores[BOT_PLAYER_ID];
       const wasBust = actualRemaining === botRemaining && botScore > 0;
       const turnScore = wasBust ? 0 : scoreEntered;
+      const x01Res = result as import("@/lib/game/rules/x01").X01TurnResult;
 
       // Persist to server
       await fetch(`/api/games/${gameId}/turns`, {
@@ -300,6 +314,18 @@ export default function GamePage() {
           scoreEntered: turnScore,
           dartsDetail: [],
           roundNumber: currentState.currentRound,
+          legNumber: x01State.currentLeg,
+          setNumber: x01State.currentSet,
+          legEnded: x01Res.legEnded,
+          legWinnerId: x01Res.legWinnerId,
+          setEnded: x01Res.setEnded,
+          setWinnerId: x01Res.setWinnerId,
+          matchOver: x01Res.matchOver,
+          matchWinnerId: x01Res.matchWinnerId,
+          nextPlayerId: newX01State.currentPlayerId,
+          nextRound: newX01State.currentRound,
+          nextLeg: newX01State.currentLeg,
+          nextSet: newX01State.currentSet,
         }),
       });
 
@@ -338,6 +364,9 @@ export default function GamePage() {
         ? (result.bust ? 0 : result.scoreDeducted)
         : 0;
 
+      const x01Res = result as import("@/lib/game/rules/x01").X01TurnResult;
+      const x01NewState = newState as import("@/lib/game/types").X01GameState;
+
       // Persist human turn
       await fetch(`/api/games/${gameId}/turns`, {
         method: "POST",
@@ -346,15 +375,29 @@ export default function GamePage() {
           scoreEntered,
           dartsDetail: [],
           roundNumber: gameState.currentRound,
+          legNumber: (gameState as import("@/lib/game/types").X01GameState).currentLeg,
+          setNumber: (gameState as import("@/lib/game/types").X01GameState).currentSet,
+          legEnded: x01Res.legEnded,
+          legWinnerId: x01Res.legWinnerId,
+          setEnded: x01Res.setEnded,
+          setWinnerId: x01Res.setWinnerId,
+          matchOver: x01Res.matchOver,
+          matchWinnerId: x01Res.matchWinnerId,
+          nextPlayerId: x01NewState.currentPlayerId,
+          nextRound: x01NewState.currentRound,
+          nextLeg: x01NewState.currentLeg,
+          nextSet: x01NewState.currentSet,
           ...(dartsAtDouble != null ? { dartsAtDouble } : {}),
           ...(dartsForCheckout != null ? { dartsForCheckout } : {}),
         }),
       });
 
-      // Check for game over after human turn
+      // Check for match over after human turn
       let gameOverResult = isGameOver(newState);
       if (gameOverResult.over && gameOverResult.winnerId) {
-        await finishGame(gameOverResult.winnerId);
+        setGameRow((prev) =>
+          prev ? { ...prev, status: "finished", winner_id: gameOverResult.winnerId! } : null
+        );
         setSubmitting(false);
         return;
       }
@@ -369,10 +412,12 @@ export default function GamePage() {
         const stateAfterBot = await playBotTurn(newState);
         setGameState(stateAfterBot);
 
-        // Check for game over after bot turn
+        // Check for match over after bot turn
         gameOverResult = isGameOver(stateAfterBot);
         if (gameOverResult.over && gameOverResult.winnerId) {
-          await finishGame(gameOverResult.winnerId);
+          setGameRow((prev) =>
+            prev ? { ...prev, status: "finished", winner_id: gameOverResult.winnerId! } : null
+          );
         }
 
         botPlayingRef.current = false;
@@ -509,7 +554,7 @@ export default function GamePage() {
           const p2Stats = calculateGameStatsForPlayer(
             gameState.turns, p2Id, gameState.mode, winnerId === p2Id
           );
-          const startScore = isX01State(gameState) ? gameState.startScore : 0;
+          const startScore = isX01State(gameState) ? gameState.startingScore : 0;
 
           return (
             <div className="space-y-4">

@@ -13,16 +13,40 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { mode, opponentId, botLevel, sessionId } = body as {
+  const {
+    mode,
+    opponentId,
+    botLevel,
+    sessionId,
+    matchFormat,
+    target,
+    startingScore,
+    inMode,
+    outMode,
+  } = body as {
     mode: string;
     opponentId?: string;
     botLevel?: number;
     sessionId?: string;
+    matchFormat?: "legs" | "sets";
+    target?: number;
+    startingScore?: number;
+    inMode?: "straight" | "double" | "master";
+    outMode?: "straight" | "double" | "master";
   };
 
-  if (!["501", "301", "cricket"].includes(mode)) {
+  if (!["501", "301", "701", "cricket", "custom"].includes(mode)) {
     return NextResponse.json({ error: "Invalid game mode" }, { status: 400 });
   }
+
+  const defaultStartingScore =
+    mode === "301" ? 301 : mode === "701" ? 701 : mode === "custom" ? (startingScore ?? 501) : 501;
+  const defaultInMode = mode === "301" ? "double" : "straight";
+  const gameStartingScore = mode === "cricket" ? null : (startingScore ?? defaultStartingScore);
+  const gameInMode = inMode ?? defaultInMode;
+  const gameOutMode = outMode ?? "double";
+  const gameMatchFormat = matchFormat ?? "legs";
+  const gameTarget = target ?? 1;
 
   let player2Id: string;
   let gameBotLevel: number | null = null;
@@ -73,6 +97,14 @@ export async function POST(request: Request) {
       status: "active",
       bot_level: gameBotLevel,
       session_id: sessionId ?? null,
+      match_format: gameMatchFormat,
+      target: gameTarget,
+      starting_score: gameStartingScore,
+      in_mode: gameInMode,
+      out_mode: gameOutMode,
+      current_leg: 1,
+      current_set: 1,
+      leg_starter_id: user.id,
     })
     .select()
     .single();

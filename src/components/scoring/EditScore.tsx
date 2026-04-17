@@ -1,6 +1,6 @@
 "use client";
 
-import { type Dart, type CricketDart, dartScore } from "@/lib/game/types";
+import { type Dart, type CricketDart, type GameMode, dartScore } from "@/lib/game/types";
 
 interface EditScoreProps {
   isOpen: boolean;
@@ -8,7 +8,7 @@ interface EditScoreProps {
   onConfirmEdit: () => void;
   lastTurnDarts: Dart[] | CricketDart[] | null;
   lastTurnScore: number;
-  mode: "501" | "301" | "cricket";
+  mode: GameMode;
 }
 
 export function EditScore({

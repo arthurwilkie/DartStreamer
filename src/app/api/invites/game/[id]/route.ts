@@ -27,7 +27,9 @@ export async function PATCH(
 
   const { data: invite, error: lookupError } = await supabase
     .from("game_invites")
-    .select("id, from_player_id, to_player_id, game_mode, session_id, status")
+    .select(
+      "id, from_player_id, to_player_id, game_mode, session_id, status, match_format, target, starting_score, in_mode, out_mode"
+    )
     .eq("id", id)
     .single();
 
@@ -58,6 +60,14 @@ export async function PATCH(
         current_round: 1,
         status: "active",
         session_id: invite.session_id ?? null,
+        match_format: invite.match_format ?? "legs",
+        target: invite.target ?? 1,
+        starting_score: invite.starting_score ?? null,
+        in_mode: invite.in_mode ?? "straight",
+        out_mode: invite.out_mode ?? "double",
+        current_leg: 1,
+        current_set: 1,
+        leg_starter_id: invite.from_player_id,
       })
       .select("id")
       .single();

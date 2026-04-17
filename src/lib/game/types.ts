@@ -1,4 +1,7 @@
-export type GameMode = "501" | "301" | "cricket";
+export type GameMode = "501" | "301" | "701" | "cricket" | "custom";
+export type MatchFormat = "legs" | "sets";
+export type InMode = "straight" | "double" | "master";
+export type OutMode = "straight" | "double" | "master";
 
 export type Multiplier = 1 | 2 | 3;
 
@@ -19,6 +22,8 @@ export interface Turn {
   gameId: string;
   playerId: string;
   roundNumber: number;
+  legNumber?: number;
+  setNumber?: number;
   scoreEntered: number;
   dartsDetail: DartsDetail;
   isEdited: boolean;
@@ -27,14 +32,26 @@ export interface Turn {
 }
 
 export interface X01GameState {
-  mode: "501" | "301";
-  startScore: number;
-  scores: Record<string, number>; // playerId -> remaining score
-  hasDoubledIn: Record<string, boolean>; // for 301 DIDO
+  mode: "501" | "301" | "701" | "custom";
+  startingScore: number;
+  inMode: InMode;
+  outMode: OutMode;
+  matchFormat: MatchFormat;
+  target: number; // best-of-N
+  player1Id: string;
+  player2Id: string;
+  scores: Record<string, number>; // playerId -> remaining score (current leg)
+  hasDoubledIn: Record<string, boolean>; // for double-in / master-in tracking
+  legsWon: Record<string, number>; // legs won in CURRENT set (or total if matchFormat='legs')
+  setsWon: Record<string, number>; // sets won overall (always 0 for matchFormat='legs')
+  currentLeg: number; // 1-indexed, overall leg count across the match
+  currentSet: number; // 1-indexed
+  legStarterId: string; // who throws first in the CURRENT leg
   currentPlayerId: string;
-  currentRound: number;
-  turns: Turn[];
-  dartsThrown: Record<string, number>; // total darts per player
+  currentRound: number; // within current leg
+  turns: Turn[]; // all turns across the match
+  dartsThrown: Record<string, number>; // darts thrown in CURRENT leg (resets each leg)
+  matchWinnerId: string | null;
 }
 
 export interface CricketNumber {
@@ -63,10 +80,16 @@ export interface GameConfig {
   player1Id: string;
   player2Id: string;
   sessionId?: string;
+  startingScore?: number; // required for x01; ignored for cricket
+  inMode?: InMode;
+  outMode?: OutMode;
+  matchFormat?: MatchFormat;
+  target?: number;
+  legStarterId?: string; // defaults to player1Id
 }
 
 export function isX01State(state: GameState): state is X01GameState {
-  return state.mode === "501" || state.mode === "301";
+  return state.mode !== "cricket";
 }
 
 export function isCricketState(state: GameState): state is CricketGameState {
@@ -86,6 +109,18 @@ export function turnTotal(darts: Dart[]): number {
 
 export function isDouble(dart: Dart): boolean {
   return dart.multiplier === 2 || dart.segment === 50; // bullseye counts as double
+}
+
+export function isDoubleOrTriple(dart: Dart): boolean {
+  return dart.multiplier === 2 || dart.multiplier === 3 || dart.segment === 50;
+}
+
+/** How many legs are needed to win a set (standard darts). */
+export const LEGS_PER_SET = 3;
+
+/** How many wins (legs or sets) are needed to win a best-of-N match. */
+export function targetToWin(target: number): number {
+  return Math.ceil(target / 2);
 }
 
 export const CRICKET_NUMBERS = [15, 16, 17, 18, 19, 20, 25] as const;
