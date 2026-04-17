@@ -163,16 +163,62 @@ export function GameStatsDisplay({
             />
           )}
           <StatRow
+            label="High Checkout"
+            value1={String(s1.highCheckout)}
+            value2={String(s2.highCheckout)}
+            highlight={highlightBetter(s1.highCheckout, s2.highCheckout, true)}
+          />
+          <StatRow
+            label="Checkout %"
+            value1={
+              s1.dartsAtDouble > 0 ? `${s1.checkoutPct.toFixed(1)}%` : "—"
+            }
+            value2={
+              s2.dartsAtDouble > 0 ? `${s2.checkoutPct.toFixed(1)}%` : "—"
+            }
+            highlight={highlightBetter(s1.checkoutPct, s2.checkoutPct, true)}
+          />
+          <StatRow
             label="180s"
             value1={String(s1.count180)}
             value2={String(s2.count180)}
             highlight={highlightBetter(s1.count180, s2.count180, true)}
           />
           <StatRow
+            label="140+"
+            value1={String(s1.c140Plus)}
+            value2={String(s2.c140Plus)}
+            highlight={highlightBetter(s1.c140Plus, s2.c140Plus, true)}
+          />
+          <StatRow
+            label="120+"
+            value1={String(s1.c120Plus)}
+            value2={String(s2.c120Plus)}
+            highlight={highlightBetter(s1.c120Plus, s2.c120Plus, true)}
+          />
+          <StatRow
             label="100+"
-            value1={String(s1.countTonPlus)}
-            value2={String(s2.countTonPlus)}
-            highlight={highlightBetter(s1.countTonPlus, s2.countTonPlus, true)}
+            value1={String(s1.c100Plus)}
+            value2={String(s2.c100Plus)}
+            highlight={highlightBetter(s1.c100Plus, s2.c100Plus, true)}
+          />
+          <StatRow
+            label="80+"
+            value1={String(s1.c80Plus)}
+            value2={String(s2.c80Plus)}
+            highlight={highlightBetter(s1.c80Plus, s2.c80Plus, true)}
+          />
+          <StatRow
+            label="60+"
+            value1={String(s1.c60Plus)}
+            value2={String(s2.c60Plus)}
+            highlight={highlightBetter(s1.c60Plus, s2.c60Plus, true)}
+          />
+          <StatRow
+            label="40+"
+            value1={String(s1.c40Plus)}
+            value2={String(s2.c40Plus)}
+            highlight={highlightBetter(s1.c40Plus, s2.c40Plus, true)}
           />
         </>
       )}

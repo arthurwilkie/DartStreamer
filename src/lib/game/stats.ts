@@ -11,17 +11,30 @@ export interface GameStats {
   isTonPlus: boolean;
   count180: number;
   countTonPlus: number;
+  // Scored-bracket counts (cumulative: c100Plus includes 140+, 180 etc.)
+  c140Plus: number;
+  c120Plus: number;
+  c100Plus: number;
+  c80Plus: number;
+  c60Plus: number;
+  c40Plus: number;
+  // Checkouts aggregated across all legs in the match
   checkoutAttempted: boolean;
   checkoutSuccess: boolean;
-  checkoutValue: number;
-  dartsToFinish: number; // total darts thrown in the leg
+  checkoutValue: number; // legacy: the final winning checkout
+  highCheckout: number; // highest successful checkout across all legs
+  checkoutsHit: number; // total legs finished by this player
+  dartsAtDouble: number; // total darts thrown at a double across all legs
+  checkoutPct: number; // checkoutsHit / dartsAtDouble
+  dartsToFinish: number; // total darts thrown across the match
 }
 
 export function calculateGameStatsForPlayer(
   turns: Turn[],
   playerId: string,
   mode: GameMode,
-  won: boolean
+  won: boolean,
+  startingScore = 501
 ): GameStats {
   const playerTurns = turns.filter((t) => t.playerId === playerId);
 
@@ -29,57 +42,97 @@ export function calculateGameStatsForPlayer(
     return calculateCricketStats(playerTurns, won);
   }
 
-  return calculateX01Stats(playerTurns, won);
+  return calculateX01Stats(playerTurns, won, startingScore);
 }
 
-function calculateX01Stats(playerTurns: Turn[], won: boolean): GameStats {
+function calculateX01Stats(
+  playerTurns: Turn[],
+  won: boolean,
+  startingScore: number
+): GameStats {
   let totalScore = 0;
   let totalDarts = 0;
   let first9Score = 0;
   let first9Darts = 0;
   let count180 = 0;
   let countTonPlus = 0;
-  let checkoutAttempted = false;
-  let checkoutSuccess = false;
+  let c140Plus = 0;
+  let c120Plus = 0;
+  let c100Plus = 0;
+  let c80Plus = 0;
+  let c60Plus = 0;
+  let c40Plus = 0;
+  let highCheckout = 0;
+  let checkoutsHit = 0;
+  let dartsAtDouble = 0;
   let checkoutValue = 0;
 
-  for (let i = 0; i < playerTurns.length; i++) {
-    const turn = playerTurns[i];
-    const darts = turn.dartsDetail as Dart[];
-    const score = turn.scoreEntered;
-    const dartsInTurn = darts.length || 3; // Turn-based entry has no dart detail, assume 3
-
-    totalScore += score;
-    totalDarts += dartsInTurn;
-
-    // First 9 darts (first 3 turns)
-    if (i < 3) {
-      first9Score += score;
-      first9Darts += dartsInTurn;
-    }
-
-    // 180 check (must be 3 darts, all triple 20)
-    if (score === 180 && dartsInTurn === 3) {
-      count180++;
-    }
-
-    // Ton+ check (100+ in a turn)
-    if (score >= 100) {
-      countTonPlus++;
-    }
-
-    // Checkout: last turn if player won
-    if (won && i === playerTurns.length - 1) {
-      checkoutAttempted = true;
-      checkoutSuccess = true;
-      checkoutValue = score;
-    }
+  // Track remaining score per leg to detect checkouts without engine help.
+  // Group turns by leg to count first-9 as darts 1-9 of each leg.
+  const byLeg = new Map<number, Turn[]>();
+  for (const t of playerTurns) {
+    const leg = t.legNumber ?? 1;
+    const arr = byLeg.get(leg) ?? [];
+    arr.push(t);
+    byLeg.set(leg, arr);
   }
 
-  const threeDartAvg =
-    totalDarts > 0 ? (totalScore / totalDarts) * 3 : 0;
-  const first9Avg =
-    first9Darts > 0 ? (first9Score / first9Darts) * 3 : 0;
+  for (const [, legTurns] of byLeg) {
+    let remaining = startingScore;
+    let legDarts = 0;
+    let legFirst9Used = 0;
+
+    for (const turn of legTurns) {
+      const darts = turn.dartsDetail as Dart[];
+      const score = turn.scoreEntered;
+      const dartsInTurn = darts.length || 3;
+
+      totalScore += score;
+      totalDarts += dartsInTurn;
+
+      // First 9 darts of the leg
+      const capacity = Math.max(0, 9 - legFirst9Used);
+      if (capacity > 0) {
+        const used = Math.min(capacity, dartsInTurn);
+        // Pro-rate score by darts used toward the first 9
+        const prorated = dartsInTurn > 0 ? (score * used) / dartsInTurn : 0;
+        first9Score += prorated;
+        first9Darts += used;
+        legFirst9Used += used;
+      }
+
+      if (score === 180 && dartsInTurn === 3) count180++;
+      if (score >= 100) countTonPlus++;
+      if (score >= 140) c140Plus++;
+      if (score >= 120) c120Plus++;
+      if (score >= 100) c100Plus++;
+      if (score >= 80) c80Plus++;
+      if (score >= 60) c60Plus++;
+      if (score >= 40) c40Plus++;
+
+      if (turn.dartsAtDouble != null) dartsAtDouble += turn.dartsAtDouble;
+
+      legDarts += dartsInTurn;
+
+      const newRemaining = remaining - score;
+      if (newRemaining === 0) {
+        // Checkout!
+        checkoutsHit++;
+        if (score > highCheckout) highCheckout = score;
+        checkoutValue = score;
+        break; // leg done
+      } else if (newRemaining > 1) {
+        remaining = newRemaining;
+      }
+      // else: bust (score stays the same, score_entered would be 0)
+    }
+    void legDarts;
+  }
+
+  const threeDartAvg = totalDarts > 0 ? (totalScore / totalDarts) * 3 : 0;
+  const first9Avg = first9Darts > 0 ? (first9Score / first9Darts) * 3 : 0;
+  const checkoutPct =
+    dartsAtDouble > 0 ? (checkoutsHit / dartsAtDouble) * 100 : 0;
 
   return {
     totalScore,
@@ -92,9 +145,19 @@ function calculateX01Stats(playerTurns: Turn[], won: boolean): GameStats {
     isTonPlus: countTonPlus > 0,
     count180,
     countTonPlus,
-    checkoutAttempted,
-    checkoutSuccess,
+    c140Plus,
+    c120Plus,
+    c100Plus,
+    c80Plus,
+    c60Plus,
+    c40Plus,
+    checkoutAttempted: won,
+    checkoutSuccess: checkoutsHit > 0,
     checkoutValue,
+    highCheckout,
+    checkoutsHit,
+    dartsAtDouble,
+    checkoutPct,
     dartsToFinish: totalDarts,
   };
 }
@@ -120,9 +183,19 @@ function calculateCricketStats(playerTurns: Turn[], _won: boolean): GameStats {
     isTonPlus: false,
     count180: 0,
     countTonPlus: 0,
+    c140Plus: 0,
+    c120Plus: 0,
+    c100Plus: 0,
+    c80Plus: 0,
+    c60Plus: 0,
+    c40Plus: 0,
     checkoutAttempted: false,
     checkoutSuccess: false,
     checkoutValue: 0,
+    highCheckout: 0,
+    checkoutsHit: 0,
+    dartsAtDouble: 0,
+    checkoutPct: 0,
     dartsToFinish: 0,
   };
 }
@@ -163,9 +236,9 @@ export function calculateStatsDelta(
       3,
       turns.filter((t) => t.playerId === playerId).length
     ),
-    checkoutAttempts: stats.checkoutAttempted ? 1 : 0,
-    checkoutSuccesses: stats.checkoutSuccess ? 1 : 0,
-    highestCheckout: stats.checkoutValue,
+    checkoutAttempts: stats.dartsAtDouble,
+    checkoutSuccesses: stats.checkoutsHit,
+    highestCheckout: stats.highCheckout,
     won,
     bestLeg: won ? stats.dartsToFinish : null,
     count180: stats.is180 ? 1 : 0,

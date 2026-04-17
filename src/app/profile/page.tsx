@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "./sign-out-button";
+import { ProfileForm } from "./profile-form";
 
 export default async function ProfilePage() {
   const supabase = await createClient();
@@ -41,9 +42,17 @@ export default async function ProfilePage() {
           )}
           <div>
             <h2 className="text-xl font-semibold">{player?.display_name}</h2>
+            {player?.nickname && (
+              <p className="text-sm text-emerald-400">“{player.nickname}”</p>
+            )}
             <p className="text-zinc-400">{user.email}</p>
           </div>
         </div>
+
+        <ProfileForm
+          initialDisplayName={player?.display_name ?? ""}
+          initialNickname={player?.nickname ?? ""}
+        />
 
         <div className="mt-12">
           <h3 className="text-lg font-semibold">Statistics</h3>

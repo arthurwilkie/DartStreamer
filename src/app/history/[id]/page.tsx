@@ -76,6 +76,8 @@ export default async function MatchDetailPage({
     scoreEntered: t.score_entered,
     dartsDetail: t.darts_detail as Dart[] | CricketDart[],
     isEdited: t.is_edited,
+    dartsAtDouble: t.darts_at_double ?? null,
+    dartsForCheckout: t.darts_for_checkout ?? null,
   }));
 
   const mode = game.mode as GameMode;
@@ -83,8 +85,9 @@ export default async function MatchDetailPage({
   const p2Id = game.player2_id;
   const winnerId = game.winner_id;
 
-  const p1Stats = calculateGameStatsForPlayer(turns, p1Id, mode, winnerId === p1Id);
-  const p2Stats = calculateGameStatsForPlayer(turns, p2Id, mode, winnerId === p2Id);
+  const startingScore = game.starting_score ?? START_SCORES[mode] ?? 501;
+  const p1Stats = calculateGameStatsForPlayer(turns, p1Id, mode, winnerId === p1Id, startingScore);
+  const p2Stats = calculateGameStatsForPlayer(turns, p2Id, mode, winnerId === p2Id, startingScore);
 
   const won = game.winner_id === user.id;
   const opponentId = game.player1_id === user.id ? game.player2_id : game.player1_id;
