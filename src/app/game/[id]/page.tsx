@@ -64,6 +64,8 @@ interface TurnRow {
   score_entered: number;
   darts_detail: Dart[] | CricketDart[] | [];
   is_edited: boolean;
+  darts_at_double?: number | null;
+  darts_for_checkout?: number | null;
 }
 
 export default function GamePage() {
@@ -169,6 +171,12 @@ export default function GamePage() {
             const { newState } = applyTurn(state, turn.player_id, darts);
             state = newState;
           }
+          // Engine doesn't know about checkout metadata — inject from DB row
+          const last = state.turns[state.turns.length - 1];
+          if (last) {
+            last.dartsAtDouble = turn.darts_at_double ?? null;
+            last.dartsForCheckout = turn.darts_for_checkout ?? null;
+          }
         }
       }
 
@@ -197,12 +205,18 @@ export default function GamePage() {
         setGameState((prev) => {
           if (!prev) return prev;
           const darts = turn.darts_detail;
+          let next;
           if (isX01State(prev) && (!darts || (darts as Dart[]).length === 0)) {
-            const { newState } = applyScoreTurn(prev, turn.player_id, turn.score_entered);
-            return newState;
+            next = applyScoreTurn(prev, turn.player_id, turn.score_entered).newState;
+          } else {
+            next = applyTurn(prev, turn.player_id, darts).newState;
           }
-          const { newState } = applyTurn(prev, turn.player_id, darts);
-          return newState;
+          const last = next.turns[next.turns.length - 1];
+          if (last) {
+            last.dartsAtDouble = turn.darts_at_double ?? null;
+            last.dartsForCheckout = turn.darts_for_checkout ?? null;
+          }
+          return next;
         });
       }
     );
@@ -358,6 +372,11 @@ export default function GamePage() {
 
       // Apply human turn locally
       const { newState, result } = applyScoreTurn(gameState, userId, score);
+      const lastTurn = newState.turns[newState.turns.length - 1];
+      if (lastTurn) {
+        lastTurn.dartsAtDouble = dartsAtDouble ?? null;
+        lastTurn.dartsForCheckout = dartsForCheckout ?? null;
+      }
       setGameState(newState);
 
       const scoreEntered = result && "scoreDeducted" in result
@@ -558,13 +577,13 @@ export default function GamePage() {
             : Object.keys(playerNames)[0];
           const p2Id = Object.keys(playerNames).find((id) => id !== p1Id) ?? "";
           const winnerId = gameRow.winner_id;
+          const startScore = isX01State(gameState) ? gameState.startingScore : 0;
           const p1Stats = calculateGameStatsForPlayer(
-            gameState.turns, p1Id, gameState.mode, winnerId === p1Id
+            gameState.turns, p1Id, gameState.mode, winnerId === p1Id, startScore || 501
           );
           const p2Stats = calculateGameStatsForPlayer(
-            gameState.turns, p2Id, gameState.mode, winnerId === p2Id
+            gameState.turns, p2Id, gameState.mode, winnerId === p2Id, startScore || 501
           );
-          const startScore = isX01State(gameState) ? gameState.startingScore : 0;
 
           return (
             <div className="space-y-4">

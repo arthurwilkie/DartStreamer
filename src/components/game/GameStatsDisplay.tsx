@@ -171,10 +171,14 @@ export function GameStatsDisplay({
           <StatRow
             label="Checkout %"
             value1={
-              s1.dartsAtDouble > 0 ? `${s1.checkoutPct.toFixed(1)}%` : "—"
+              s1.dartsAtDouble > 0
+                ? `${s1.checkoutsHit}/${s1.dartsAtDouble} (${s1.checkoutPct.toFixed(0)}%)`
+                : "—"
             }
             value2={
-              s2.dartsAtDouble > 0 ? `${s2.checkoutPct.toFixed(1)}%` : "—"
+              s2.dartsAtDouble > 0
+                ? `${s2.checkoutsHit}/${s2.dartsAtDouble} (${s2.checkoutPct.toFixed(0)}%)`
+                : "—"
             }
             highlight={highlightBetter(s1.checkoutPct, s2.checkoutPct, true)}
           />
