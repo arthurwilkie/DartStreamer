@@ -49,18 +49,19 @@ const LEVEL_STDDEV: Record<number, number> = {
   10: 14,
 };
 
-// Checkout probability increases with skill
-const LEVEL_CHECKOUT_PCT: Record<number, number> = {
-  1: 0.02,
-  2: 0.05,
-  3: 0.08,
-  4: 0.12,
-  5: 0.18,
-  6: 0.25,
+// Per-dart double success rate, modelled on real player stats.
+// Amateur (lvl 1): ~6%. PDC tour pro (lvl 10): ~44%.
+const LEVEL_DOUBLE_PCT: Record<number, number> = {
+  1: 0.06,
+  2: 0.09,
+  3: 0.13,
+  4: 0.17,
+  5: 0.22,
+  6: 0.27,
   7: 0.32,
-  8: 0.40,
-  9: 0.50,
-  10: 0.60,
+  8: 0.37,
+  9: 0.41,
+  10: 0.44,
 };
 
 /** Box-Muller transform for gaussian random numbers */
@@ -78,37 +79,53 @@ function gaussianRandom(mean: number, stddev: number): number {
  * @param remaining  Bot's remaining score
  * @returns The score for the turn (0 if bust)
  */
+/** Direct-checkout remaining values that can be finished with a single double-out dart. */
+function isSingleDartDouble(remaining: number): boolean {
+  if (remaining === 50) return true;
+  return remaining >= 2 && remaining <= 40 && remaining % 2 === 0;
+}
+
 export function generateBotScore(level: number, remaining: number): number {
   const clampedLevel = Math.max(1, Math.min(10, level));
   const avg = LEVEL_AVG[clampedLevel];
   const stddev = LEVEL_STDDEV[clampedLevel];
-  const checkoutPct = LEVEL_CHECKOUT_PCT[clampedLevel];
+  const doublePct = LEVEL_DOUBLE_PCT[clampedLevel];
 
-  // If remaining is achievable in this turn (≤170 for checkout)
-  if (remaining <= 170 && remaining >= 2) {
-    // Attempt checkout
-    if (Math.random() < checkoutPct) {
-      return remaining; // Successful checkout!
+  // Direct checkout: need a double dart. Simulate up to 3 attempts.
+  if (isSingleDartDouble(remaining)) {
+    for (let dart = 0; dart < 3; dart++) {
+      if (Math.random() < doublePct) {
+        return remaining; // Hit the double, checked out.
+      }
     }
+    // Three misses. Most common outcome: one dart bounces into the single area
+    // of the same number (scores half), otherwise leaves the remaining alone or busts.
+    const r = Math.random();
+    if (r < 0.45) {
+      // Hit single of the double number once — reduces remaining by half of the target double.
+      // e.g. D16 (32) becomes 32-16=16 remaining, so score = 16.
+      const halfHit = remaining === 50 ? 25 : remaining / 2;
+      return halfHit;
+    }
+    if (r < 0.7) {
+      return 0; // Missed entirely — no score change.
+    }
+    // Bust by overshooting (e.g., hit the odd single next to the double).
+    return 0;
   }
 
   // Generate a normal-distribution score around the level's average
   let score = Math.round(gaussianRandom(avg, stddev));
-
-  // Clamp to valid range
   score = Math.max(0, Math.min(180, score));
 
-  // Check bust conditions
   const newRemaining = remaining - score;
   if (newRemaining < 0 || newRemaining === 1) {
-    // Bust — return 0
+    // Bust
     return 0;
   }
 
-  // Don't accidentally checkout without going through the checkout logic
+  // If this would checkout without the double-out logic, trim the score so it doesn't.
   if (newRemaining === 0) {
-    // Unintentional checkout — reduce score by a small amount to avoid it
-    // (checkout should only happen through the intentional checkout path above)
     score = Math.max(0, score - 2);
   }
 

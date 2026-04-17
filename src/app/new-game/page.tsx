@@ -40,7 +40,7 @@ export default function NewGamePage() {
   const [scoreVariant, setScoreVariant] = useState<ScoreVariant>("501");
   const [customScore, setCustomScore] = useState(501);
   const [matchFormat, setMatchFormat] = useState<MatchFormat>("legs");
-  const [target, setTarget] = useState(1);
+  const [target, setTarget] = useState(3);
   const [inMode, setInMode] = useState<InMode>("straight");
   const [outMode, setOutMode] = useState<OutMode>("double");
   const [opponentType, setOpponentType] = useState<"bot" | "player">("bot");
@@ -311,23 +311,21 @@ export default function NewGamePage() {
               matchFormat === "sets" ? "bg-zinc-700 text-white" : "text-zinc-400"
             }`}
           >
-            First to X Sets
+            Best of X Sets
           </button>
         </div>
         <div className="mt-3 flex items-center justify-between">
-          <span className="text-sm text-zinc-400">
-            {matchFormat === "legs" ? "Best of" : "First to"}
-          </span>
+          <span className="text-sm text-zinc-400">Best of</span>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setTarget((t) => Math.max(1, t - (matchFormat === "legs" ? 2 : 1)))}
+              onClick={() => setTarget((t) => Math.max(1, t - 2))}
               className="h-9 w-9 rounded-full bg-zinc-800 text-xl leading-none hover:bg-zinc-700"
             >
               −
             </button>
             <span className="w-12 text-center text-2xl font-bold">{target}</span>
             <button
-              onClick={() => setTarget((t) => t + (matchFormat === "legs" ? 2 : 1))}
+              onClick={() => setTarget((t) => t + 2)}
               className="h-9 w-9 rounded-full bg-zinc-800 text-xl leading-none hover:bg-zinc-700"
             >
               +
@@ -337,6 +335,9 @@ export default function NewGamePage() {
             </span>
           </div>
         </div>
+        <p className="mt-1 text-xs text-zinc-500">
+          First to {Math.ceil(target / 2)} {matchFormat === "legs" ? "legs" : "sets"} wins
+        </p>
 
         {/* Opponent type tabs */}
         <div className="mt-6 flex rounded-lg bg-zinc-800 p-1">

@@ -14,7 +14,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("game_invites")
     .select(
-      "id, from_player_id, to_player_id, game_mode, session_id, status, created_at, from_player:players!game_invites_from_player_id_fkey(display_name, avatar_url)"
+      "id, from_player_id, to_player_id, game_mode, session_id, status, created_at, match_format, target, starting_score, in_mode, out_mode, from_player:players!game_invites_from_player_id_fkey(display_name, avatar_url)"
     )
     .eq("to_player_id", user.id)
     .eq("status", "pending")

@@ -20,7 +20,30 @@ interface GameInvite {
   session_id: string | null;
   status: string;
   created_at: string;
+  match_format?: "legs" | "sets";
+  target?: number;
+  starting_score?: number | null;
+  in_mode?: "straight" | "double" | "master";
+  out_mode?: "straight" | "double" | "master";
   from_player: { display_name: string; avatar_url: string | null };
+}
+
+function formatInOut(mode?: "straight" | "double" | "master"): string {
+  if (mode === "double") return "double";
+  if (mode === "master") return "master";
+  return "straight";
+}
+
+function describeGameInvite(inv: GameInvite): string {
+  if (inv.game_mode === "cricket") {
+    return `Cricket, best of ${inv.target ?? 1} ${inv.match_format ?? "legs"}`;
+  }
+  const score =
+    inv.starting_score ??
+    (inv.game_mode === "301" ? 301 : inv.game_mode === "701" ? 701 : 501);
+  const inOut = `${formatInOut(inv.in_mode)}-in ${formatInOut(inv.out_mode)}-out`;
+  const format = `best of ${inv.target ?? 1} ${inv.match_format ?? "legs"}`;
+  return `${score} ${inOut}, ${format}`;
 }
 
 type Invite =
@@ -143,11 +166,6 @@ export function NotificationBell() {
   );
 
   const count = invites.length;
-  const modeLabels: Record<string, string> = {
-    "501": "501",
-    "301": "301",
-    cricket: "Cricket",
-  };
 
   return (
     <div className="relative" ref={menuRef}>
@@ -201,7 +219,7 @@ export function NotificationBell() {
                       <span className="font-medium text-white">{name}</span>
                       {invite.type === "session"
                         ? " invited you to a streaming session"
-                        : ` invited you to a game of ${modeLabels[invite.data.game_mode] ?? invite.data.game_mode}`}
+                        : ` invited you to a game of ${describeGameInvite(invite.data)}`}
                     </p>
                     <div className="mt-2 flex gap-2">
                       <button

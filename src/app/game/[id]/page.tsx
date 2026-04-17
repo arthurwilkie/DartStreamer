@@ -681,6 +681,7 @@ export default function GamePage() {
           isOpen={showDartsAtDoublePopup}
           options={dartsAtDoubleOptions}
           checkedOut={pendingCheckedOut}
+          outMode={isX01State(gameState) ? gameState.outMode : "double"}
           onConfirm={handleDartsAtDoubleConfirm}
         />
 

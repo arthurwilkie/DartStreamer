@@ -6,6 +6,7 @@ interface DartsAtDoublePopupProps {
   isOpen: boolean;
   options: number[];
   checkedOut: boolean;
+  outMode?: "straight" | "double" | "master";
   onConfirm: (dartsAtDouble: number, dartsForCheckout?: number) => void;
 }
 
@@ -13,8 +14,10 @@ export function DartsAtDoublePopup({
   isOpen,
   options,
   checkedOut,
+  outMode = "double",
   onConfirm,
 }: DartsAtDoublePopupProps) {
+  const finisherLabel = outMode === "master" ? "double/triple" : "double";
   const [selectedDouble, setSelectedDouble] = useState<number>(options[0] ?? 0);
   const [selectedCheckout, setSelectedCheckout] = useState<number>(1);
 
@@ -24,7 +27,7 @@ export function DartsAtDoublePopup({
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 pb-8">
       <div className="w-full max-w-sm rounded-2xl bg-zinc-800 p-6">
         <h3 className="text-center text-lg font-black uppercase tracking-wide text-white">
-          Darts used on a double
+          Darts used on a {finisherLabel}
         </h3>
 
         <div className="mt-5 flex justify-center gap-3">

@@ -12,14 +12,18 @@ interface X01ScoreboardProps {
 export function X01Scoreboard({ state, playerNames, currentUserId }: X01ScoreboardProps) {
   const players = Object.keys(state.scores);
 
-  // Calculate per-player stats
+  // Calculate per-player stats for the CURRENT leg (matches dartsThrown scope)
   function getPlayerStats(playerId: string) {
-    const playerTurns = state.turns.filter((t) => t.playerId === playerId);
-    const totalScore = playerTurns.reduce((sum, t) => sum + t.scoreEntered, 0);
-    const totalDarts = state.dartsThrown[playerId] || 0;
-    const threeDartAvg = totalDarts > 0 ? (totalScore / totalDarts) * 3 : 0;
-    const lastScore = playerTurns.length > 0 ? playerTurns[playerTurns.length - 1].scoreEntered : null;
-    return { threeDartAvg, lastScore, dartsThrown: totalDarts };
+    const legTurns = state.turns.filter(
+      (t) => t.playerId === playerId && (t.legNumber ?? state.currentLeg) === state.currentLeg
+    );
+    const legScore = legTurns.reduce((sum, t) => sum + t.scoreEntered, 0);
+    const legDarts = state.dartsThrown[playerId] || 0;
+    const threeDartAvg = legDarts > 0 ? (legScore / legDarts) * 3 : 0;
+    const allPlayerTurns = state.turns.filter((t) => t.playerId === playerId);
+    const lastScore =
+      allPlayerTurns.length > 0 ? allPlayerTurns[allPlayerTurns.length - 1].scoreEntered : null;
+    return { threeDartAvg, lastScore, dartsThrown: legDarts };
   }
 
   const inLabel =
@@ -37,7 +41,7 @@ export function X01Scoreboard({ state, playerNames, currentUserId }: X01Scoreboa
 
   const matchLabel =
     state.matchFormat === "sets"
-      ? `First to ${Math.ceil(state.target / 2)} sets`
+      ? `Best of ${state.target} sets`
       : `Best of ${state.target} legs`;
 
   return (
