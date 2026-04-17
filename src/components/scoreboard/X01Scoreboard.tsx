@@ -12,18 +12,23 @@ interface X01ScoreboardProps {
 export function X01Scoreboard({ state, playerNames, currentUserId }: X01ScoreboardProps) {
   const players = Object.keys(state.scores);
 
-  // Calculate per-player stats for the CURRENT leg (matches dartsThrown scope)
+  // Three-dart average is computed across the whole match; darts thrown counts
+  // completed turns plus the in-progress leg (dartsThrown resets per leg).
   function getPlayerStats(playerId: string) {
-    const legTurns = state.turns.filter(
-      (t) => t.playerId === playerId && (t.legNumber ?? state.currentLeg) === state.currentLeg
-    );
-    const legScore = legTurns.reduce((sum, t) => sum + t.scoreEntered, 0);
-    const legDarts = state.dartsThrown[playerId] || 0;
-    const threeDartAvg = legDarts > 0 ? (legScore / legDarts) * 3 : 0;
-    const allPlayerTurns = state.turns.filter((t) => t.playerId === playerId);
+    const playerTurns = state.turns.filter((t) => t.playerId === playerId);
+    let matchDarts = 0;
+    let matchScore = 0;
+    for (const t of playerTurns) {
+      const details = t.dartsDetail as unknown[];
+      const darts =
+        t.dartsForCheckout ?? (details && details.length > 0 ? details.length : 3);
+      matchDarts += darts;
+      matchScore += t.scoreEntered;
+    }
+    const threeDartAvg = matchDarts > 0 ? (matchScore / matchDarts) * 3 : 0;
     const lastScore =
-      allPlayerTurns.length > 0 ? allPlayerTurns[allPlayerTurns.length - 1].scoreEntered : null;
-    return { threeDartAvg, lastScore, dartsThrown: legDarts };
+      playerTurns.length > 0 ? playerTurns[playerTurns.length - 1].scoreEntered : null;
+    return { threeDartAvg, lastScore, dartsThrown: matchDarts };
   }
 
   const inLabel =
