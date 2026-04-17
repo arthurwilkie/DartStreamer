@@ -534,10 +534,20 @@ export default function GamePage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="mx-auto max-w-md px-4 py-4">
-        {/* Camera status icon */}
-        {!isFinished && !isBotGame && (
-          <div className="flex justify-end">
-            <CameraStatusIcon onOpenDeviceCamera={() => setDeviceCameraOpen(true)} />
+        {/* Top bar: broadcast link + camera status */}
+        {!isFinished && (
+          <div className="flex items-center justify-end gap-3">
+            <a
+              href={`/broadcast/${gameId}`}
+              target="_blank"
+              rel="noopener"
+              className="rounded-lg border border-zinc-700 px-3 py-1 text-xs font-semibold tracking-wider text-zinc-300 hover:border-emerald-500 hover:text-emerald-400"
+            >
+              BROADCAST
+            </a>
+            {!isBotGame && (
+              <CameraStatusIcon onOpenDeviceCamera={() => setDeviceCameraOpen(true)} />
+            )}
           </div>
         )}
 
