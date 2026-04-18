@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { decryptStreamKey } from "@/lib/stream-key-crypto";
 
 const MEDIA_SERVER_URL = process.env.NEXT_PUBLIC_MEDIA_SERVER_URL ?? "http://localhost:4000";
 
@@ -31,10 +33,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
-  // Fetch the user's stream key from the players table
-  const { data: player, error: playerError } = await supabase
+  // Fetch the user's encrypted stream key — column is revoked from the
+  // authenticated role, so we go through the admin client after verifying
+  // the caller's identity above.
+  const admin = createAdminClient();
+  const { data: player, error: playerError } = await admin
     .from("players")
-    .select("stream_key")
+    .select("stream_key_encrypted")
     .eq("id", user.id)
     .single();
 
@@ -47,7 +52,8 @@ export async function POST(request: Request) {
 
   try {
     if (action === "start") {
-      const streamKey = player.stream_key as string | null;
+      const ciphertext = player.stream_key_encrypted as string | null;
+      const streamKey = ciphertext ? decryptStreamKey(ciphertext) : null;
       if (!streamKey) {
         return NextResponse.json(
           { error: "No stream key configured. Add your YouTube stream key in settings." },

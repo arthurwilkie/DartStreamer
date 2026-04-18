@@ -22,14 +22,10 @@ export default function SettingsPage() {
         return;
       }
 
-      const { data: player } = await supabase
-        .from("players")
-        .select("stream_key_encrypted")
-        .eq("id", user.id)
-        .single();
-
-      if (player?.stream_key_encrypted) {
-        setStreamKey("••••••••••••••••");
+      const r = await fetch("/api/stream-key");
+      if (r.ok) {
+        const { hasKey } = (await r.json()) as { hasKey: boolean };
+        if (hasKey) setStreamKey("••••••••••••••••");
       }
       setLoading(false);
     }
@@ -39,21 +35,15 @@ export default function SettingsPage() {
   async function saveStreamKey() {
     if (!streamKey || streamKey === "••••••••••••••••") return;
 
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) return;
-
-    // In production, encrypt before storing. For now, store as-is.
-    // The compositing server will handle decryption.
-    await supabase
-      .from("players")
-      .update({ stream_key_encrypted: streamKey })
-      .eq("id", user.id);
+    const r = await fetch("/api/stream-key", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ streamKey }),
+    });
+    if (!r.ok) return;
 
     setSaved(true);
+    setStreamKey("••••••••••••••••");
     setTimeout(() => setSaved(false), 2000);
   }
 

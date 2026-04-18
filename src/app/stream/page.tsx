@@ -53,15 +53,13 @@ export default function StreamPage() {
       }
       setUserId(user.id);
 
-      // Load player's saved stream key
-      const { data: player } = await supabase
-        .from("players")
-        .select("stream_key_encrypted")
-        .eq("id", user.id)
-        .single();
-
-      if (player?.stream_key_encrypted) {
-        setSavedStreamKey(player.stream_key_encrypted);
+      // Stream keys live in an RLS-revoked column; fetch existence via API.
+      const r = await fetch("/api/stream-key");
+      if (r.ok) {
+        const { hasKey } = (await r.json()) as { hasKey: boolean };
+        // The real plaintext never reaches the browser; downstream UI only
+        // needs to know a key is present. Start flow decrypts server-side.
+        if (hasKey) setSavedStreamKey("__saved__");
       }
 
       // Check for active session (created by user or where user is opponent)
