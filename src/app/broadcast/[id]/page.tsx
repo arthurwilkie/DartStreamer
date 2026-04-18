@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { subscribeToGame } from "@/lib/supabase/realtime";
@@ -14,6 +14,8 @@ import {
 import { createGameState, applyTurn, applyScoreTurn } from "@/lib/game/engine";
 import { calculateGameStatsForPlayer } from "@/lib/game/stats";
 import { BOT_PLAYER_ID } from "@/lib/game/bot";
+import { ViewerPeer } from "@/lib/webrtc/peer";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 interface GameRow {
   id: string;
@@ -250,6 +252,8 @@ export default function BroadcastPage() {
           displayName={names[p1Id] ?? "Player 1"}
           nickname={nicknames[p1Id]}
           cameraX={30}
+          playerId={p1Id}
+          supabase={supabase}
         />
         {/* Player 2 card */}
         <PlayerCard
@@ -257,6 +261,8 @@ export default function BroadcastPage() {
           displayName={names[p2Id] ?? "Player 2"}
           nickname={nicknames[p2Id]}
           cameraX={630}
+          playerId={p2Id}
+          supabase={supabase}
         />
 
         {/* Header row above scores */}
@@ -327,11 +333,15 @@ function PlayerCard({
   displayName,
   nickname,
   cameraX,
+  playerId,
+  supabase,
 }: {
   x: number;
   displayName: string;
   nickname: string | null;
   cameraX: number;
+  playerId: string;
+  supabase: SupabaseClient;
 }) {
   return (
     <>
@@ -339,9 +349,12 @@ function PlayerCard({
         className="absolute rounded-2xl bg-zinc-900"
         style={{ left: x, top: 240, width: 585, height: 820 }}
       />
-      <div
-        className="absolute rounded-[22px] bg-orange-500"
-        style={{ left: cameraX, top: 255, width: 555, height: 555 }}
+      <CameraFeed
+        playerId={playerId}
+        supabase={supabase}
+        x={cameraX}
+        y={255}
+        size={555}
       />
       <div
         className="absolute flex flex-col items-center justify-start"
@@ -504,6 +517,107 @@ function StatBroadcastRow({
       <div className="w-1/3 text-right pr-4 font-semibold text-white">{v1}</div>
       <div className="w-1/3 text-center text-[15px] text-zinc-500">{label}</div>
       <div className="w-1/3 pl-4 font-semibold text-white">{v2}</div>
+    </div>
+  );
+}
+
+function CameraFeed({
+  playerId,
+  supabase,
+  x,
+  y,
+  size,
+}: {
+  playerId: string;
+  supabase: SupabaseClient;
+  x: number;
+  y: number;
+  size: number;
+}) {
+  const [pairingId, setPairingId] = useState<string | null>(null);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function lookup() {
+      const { data } = await supabase
+        .from("camera_pairings")
+        .select("id, status")
+        .eq("player_id", playerId)
+        .eq("status", "paired")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (cancelled) return;
+      setPairingId(data && data.length > 0 ? data[0].id : null);
+    }
+    void lookup();
+
+    const channel = supabase
+      .channel(`broadcast-camera:${playerId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "camera_pairings",
+          filter: `player_id=eq.${playerId}`,
+        },
+        (payload) => {
+          const row = payload.new as { id: string; status: string };
+          setPairingId(row.status === "paired" ? row.id : null);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [playerId, supabase]);
+
+  useEffect(() => {
+    if (!pairingId) {
+      setStream(null);
+      return;
+    }
+    const peer = new ViewerPeer(supabase, pairingId);
+    peer.onStream = (s) => setStream(s);
+    return () => {
+      peer.destroy();
+      setStream(null);
+    };
+  }, [pairingId, supabase]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v && stream && v.srcObject !== stream) {
+      v.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <div
+      className="absolute overflow-hidden rounded-[22px] bg-black"
+      style={{ left: x, top: y, width: size, height: size }}
+    >
+      {stream ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src="/camera-not-connected.png"
+          alt="Camera not connected"
+          className="h-full w-full object-cover"
+        />
+      )}
     </div>
   );
 }
