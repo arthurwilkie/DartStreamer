@@ -155,13 +155,6 @@ export function GameStatsDisplay({
               false
             )}
           />
-          {(s1.checkoutSuccess || s2.checkoutSuccess) && (
-            <StatRow
-              label="Checkout"
-              value1={s1.checkoutSuccess ? String(s1.checkoutValue) : "-"}
-              value2={s2.checkoutSuccess ? String(s2.checkoutValue) : "-"}
-            />
-          )}
           <StatRow
             label="High Checkout"
             value1={String(s1.highCheckout)}
