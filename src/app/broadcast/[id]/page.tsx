@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { createBroadcastClient } from "@/lib/supabase/broadcast-client";
 import { subscribeToGame } from "@/lib/supabase/realtime";
 import {
   type GameState,
@@ -45,8 +46,13 @@ interface TurnRow {
 
 export default function BroadcastPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const gameId = params.id as string;
-  const supabase = useMemo(() => createClient(), []);
+  const renderToken = searchParams.get("t");
+  const supabase = useMemo(
+    () => (renderToken ? createBroadcastClient(renderToken) : createClient()),
+    [renderToken]
+  );
 
   const [gameRow, setGameRow] = useState<GameRow | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
