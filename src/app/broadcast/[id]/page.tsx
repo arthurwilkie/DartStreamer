@@ -207,6 +207,18 @@ export default function BroadcastPage() {
       ? `Set ${state.currentSet} · Leg ${state.currentLeg}`
       : `Leg ${state.currentLeg}`;
 
+  const winnerId = gameRow.winner_id;
+  const headerLabel = (() => {
+    if (!isFinished || !winnerId) return legSetLabel;
+    const winCounts =
+      gameRow.match_format === "sets"
+        ? [p1Sets, p2Sets]
+        : [p1Legs, p2Legs];
+    const winnerCount = winnerId === p1Id ? winCounts[0] : winCounts[1];
+    const loserCount = winnerId === p1Id ? winCounts[1] : winCounts[0];
+    return `${names[winnerId] ?? "Winner"} wins ${winnerCount}-${loserCount}`;
+  })();
+
   const activeId = isFinished ? null : state.currentPlayerId;
 
   return (
@@ -255,7 +267,13 @@ export default function BroadcastPage() {
           <div className="text-[22px] font-bold tracking-widest text-white">
             {matchLabel}
           </div>
-          <div className="text-[18px] tracking-wide">{legSetLabel}</div>
+          <div
+            className={`text-[18px] tracking-wide ${
+              isFinished ? "font-bold text-emerald-400" : ""
+            }`}
+          >
+            {headerLabel}
+          </div>
         </div>
 
         {/* Score card — Bill (left/P1) */}
@@ -270,6 +288,7 @@ export default function BroadcastPage() {
           legs={p1Legs}
           sets={p1Sets}
           showSets={gameRow.match_format === "sets"}
+          isWinner={winnerId === p1Id}
         />
         {/* Score card — Arthur (right/P2) */}
         <ScoreCard
@@ -283,6 +302,7 @@ export default function BroadcastPage() {
           legs={p2Legs}
           sets={p2Sets}
           showSets={gameRow.match_format === "sets"}
+          isWinner={winnerId === p2Id}
         />
 
         {/* Match Statistics panel */}
@@ -354,6 +374,7 @@ function ScoreCard({
   legs,
   sets,
   showSets,
+  isWinner,
 }: {
   x: number;
   name: string;
@@ -365,17 +386,31 @@ function ScoreCard({
   legs: number;
   sets: number;
   showSets: boolean;
+  isWinner: boolean;
 }) {
   return (
     <div
       className={`absolute rounded-2xl bg-zinc-900 p-5 ${
-        active ? "ring-2 ring-emerald-400" : ""
+        isWinner
+          ? "ring-2 ring-emerald-400"
+          : active
+          ? "ring-2 ring-emerald-400"
+          : ""
       }`}
       style={{ left: x, top: 110, width: 315, height: 290 }}
     >
       <div className="flex items-start justify-between">
-        <div className="text-[22px] font-semibold text-white">{name}</div>
-        {active && <div className="mt-2 h-3 w-3 rounded-full bg-emerald-400" />}
+        <div
+          className={`text-[22px] font-semibold ${
+            isWinner ? "text-emerald-400" : "text-white"
+          }`}
+        >
+          {name}
+          {isWinner && " \u2713"}
+        </div>
+        {active && !isWinner && (
+          <div className="mt-2 h-3 w-3 rounded-full bg-emerald-400" />
+        )}
       </div>
       <div className="mt-1 flex items-center gap-4 text-[15px] tracking-wider text-zinc-400">
         {showSets && (

@@ -242,6 +242,7 @@ function advanceAfterCheckout(
         setsWon,
         currentSet,
         matchWinnerId,
+        scores: { ...state.scores, [winnerId]: 0 },
         // keep currentPlayerId on winner for display
       },
       result: {
