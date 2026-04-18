@@ -2,19 +2,24 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getIceServers } from "./config";
 
 type SignalMessage =
-  | { type: "offer"; sdp: string }
-  | { type: "answer"; sdp: string }
-  | { type: "ice"; candidate: RTCIceCandidateInit };
+  | { type: "offer"; sdp: string; viewerId: string }
+  | { type: "answer"; sdp: string; viewerId: string }
+  | { type: "ice"; candidate: RTCIceCandidateInit; viewerId: string; from: "camera" | "viewer" };
 
 const LOG_PREFIX_CAM = "[CameraPeer]";
 const LOG_PREFIX_VIEW = "[ViewerPeer]";
 
+function randomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
 /**
  * CameraPeer — the sender side (runs on /camera page).
- * Waits for an offer from a ViewerPeer, then answers with the local stream.
+ * Can serve multiple concurrent viewers over the same pairing channel; each
+ * viewer is identified by a `viewerId` included in every signaling message.
  */
 export class CameraPeer {
-  private pc: RTCPeerConnection | null = null;
+  private pcs = new Map<string, RTCPeerConnection>();
   private channel: ReturnType<SupabaseClient["channel"]>;
   private localStream: MediaStream;
   private destroyed = false;
@@ -28,7 +33,6 @@ export class CameraPeer {
     this.channel = supabase.channel(`webrtc-signal:${pairingId}`);
     console.log(LOG_PREFIX_CAM, "created, pairingId:", pairingId);
     console.log(LOG_PREFIX_CAM, "local tracks:", localStream.getTracks().map(t => `${t.kind}:${t.readyState}`));
-    console.log(LOG_PREFIX_CAM, "ICE servers:", JSON.stringify(getIceServers()));
     this.init();
   }
 
@@ -37,7 +41,9 @@ export class CameraPeer {
       .on("broadcast", { event: "signal" }, ({ payload }) => {
         if (this.destroyed) return;
         const msg = payload as SignalMessage;
-        console.log(LOG_PREFIX_CAM, "received signal:", msg.type);
+        // Camera ignores its own ICE messages (from: "camera")
+        if (msg.type === "ice" && msg.from === "camera") return;
+        console.log(LOG_PREFIX_CAM, "received signal:", msg.type, "viewerId:", msg.viewerId);
         void this.handleSignal(msg);
       })
       .subscribe((status) => {
@@ -47,93 +53,89 @@ export class CameraPeer {
 
   private async handleSignal(msg: SignalMessage) {
     if (msg.type === "offer") {
-      console.log(LOG_PREFIX_CAM, "received offer, creating answer...");
-      // New viewer connecting — create fresh peer connection
-      this.closePc();
+      const { viewerId } = msg;
+      // Replace any existing PC for this viewerId (re-offer on retry)
+      this.closeViewer(viewerId);
+
       const pc = new RTCPeerConnection({ iceServers: getIceServers() });
-      this.pc = pc;
+      this.pcs.set(viewerId, pc);
 
       pc.oniceconnectionstatechange = () => {
-        console.log(LOG_PREFIX_CAM, "ICE connection state:", pc.iceConnectionState);
+        console.log(LOG_PREFIX_CAM, viewerId, "ICE state:", pc.iceConnectionState);
       };
-
       pc.onconnectionstatechange = () => {
-        console.log(LOG_PREFIX_CAM, "connection state:", pc.connectionState);
-      };
-
-      pc.onicegatheringstatechange = () => {
-        console.log(LOG_PREFIX_CAM, "ICE gathering state:", pc.iceGatheringState);
-      };
-
-      // Add local tracks
-      this.localStream.getTracks().forEach((track) => {
-        pc.addTrack(track, this.localStream);
-        console.log(LOG_PREFIX_CAM, "added track:", track.kind, track.readyState);
-      });
-
-      // Send ICE candidates as they're gathered
-      let iceCandidateCount = 0;
-      pc.onicecandidate = (e) => {
-        if (e.candidate && !this.destroyed) {
-          iceCandidateCount++;
-          console.log(LOG_PREFIX_CAM, `sending ICE candidate #${iceCandidateCount}:`, e.candidate.type, e.candidate.protocol, e.candidate.address);
-          void this.channel.send({
-            type: "broadcast",
-            event: "signal",
-            payload: { type: "ice", candidate: e.candidate.toJSON() },
-          });
-        } else if (!e.candidate) {
-          console.log(LOG_PREFIX_CAM, "ICE gathering complete, total candidates:", iceCandidateCount);
+        console.log(LOG_PREFIX_CAM, viewerId, "connection state:", pc.connectionState);
+        if (
+          pc.connectionState === "failed" ||
+          pc.connectionState === "closed" ||
+          pc.connectionState === "disconnected"
+        ) {
+          // Don't auto-remove on "disconnected" — ICE can recover. Only on failed/closed.
+          if (pc.connectionState !== "disconnected") this.closeViewer(viewerId);
         }
       };
 
-      // Set remote offer and create answer
-      await pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
-      console.log(LOG_PREFIX_CAM, "set remote description (offer)");
+      this.localStream.getTracks().forEach((track) => {
+        pc.addTrack(track, this.localStream);
+      });
 
+      pc.onicecandidate = (e) => {
+        if (e.candidate && !this.destroyed) {
+          void this.channel.send({
+            type: "broadcast",
+            event: "signal",
+            payload: {
+              type: "ice",
+              candidate: e.candidate.toJSON(),
+              viewerId,
+              from: "camera",
+            } satisfies SignalMessage,
+          });
+        }
+      };
+
+      await pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      console.log(LOG_PREFIX_CAM, "created and set local description (answer)");
 
       void this.channel.send({
         type: "broadcast",
         event: "signal",
-        payload: { type: "answer", sdp: answer.sdp },
+        payload: { type: "answer", sdp: answer.sdp ?? "", viewerId } satisfies SignalMessage,
       });
-      console.log(LOG_PREFIX_CAM, "sent answer");
+      console.log(LOG_PREFIX_CAM, "sent answer to", viewerId);
     } else if (msg.type === "ice") {
-      if (this.pc && this.pc.remoteDescription) {
-        console.log(LOG_PREFIX_CAM, "adding remote ICE candidate");
-        await this.pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-      } else {
-        console.log(LOG_PREFIX_CAM, "dropping ICE candidate — no PC or remote description");
+      const pc = this.pcs.get(msg.viewerId);
+      if (pc && pc.remoteDescription) {
+        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
       }
     }
-    // Camera side ignores "answer" messages (those are for the viewer)
+    // answers are ignored on the camera side
   }
 
-  private closePc() {
-    if (this.pc) {
-      this.pc.onicecandidate = null;
-      this.pc.oniceconnectionstatechange = null;
-      this.pc.onconnectionstatechange = null;
-      this.pc.onicegatheringstatechange = null;
-      this.pc.close();
-      this.pc = null;
-    }
+  private closeViewer(viewerId: string) {
+    const pc = this.pcs.get(viewerId);
+    if (!pc) return;
+    pc.onicecandidate = null;
+    pc.oniceconnectionstatechange = null;
+    pc.onconnectionstatechange = null;
+    pc.close();
+    this.pcs.delete(viewerId);
   }
 
   destroy() {
     console.log(LOG_PREFIX_CAM, "destroying");
     this.destroyed = true;
-    this.closePc();
+    for (const viewerId of Array.from(this.pcs.keys())) {
+      this.closeViewer(viewerId);
+    }
     void this.channel.unsubscribe();
   }
 }
 
 /**
- * ViewerPeer — the receiver side (runs on the game page).
- * Creates an offer and sends it to the CameraPeer, then plays the remote stream.
+ * ViewerPeer — the receiver side. Creates an offer keyed by a unique
+ * `viewerId` so the camera can distinguish it from other concurrent viewers.
  */
 export class ViewerPeer {
   private pc!: RTCPeerConnection;
@@ -143,6 +145,7 @@ export class ViewerPeer {
   private answerReceived = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private retryCount = 0;
+  private viewerId = randomId();
   private static MAX_RETRIES = 10;
   private static RETRY_INTERVAL_MS = 3000;
 
@@ -154,51 +157,36 @@ export class ViewerPeer {
     private pairingId: string
   ) {
     this.channel = supabase.channel(`webrtc-signal:${pairingId}`);
-    console.log(LOG_PREFIX_VIEW, "created, pairingId:", pairingId);
-    console.log(LOG_PREFIX_VIEW, "ICE servers:", JSON.stringify(getIceServers()));
+    console.log(LOG_PREFIX_VIEW, "created, pairingId:", pairingId, "viewerId:", this.viewerId);
     this.init();
   }
 
   private createPc() {
     const pc = new RTCPeerConnection({ iceServers: getIceServers() });
 
-    // Receive remote tracks
     pc.ontrack = (e) => {
-      console.log(LOG_PREFIX_VIEW, "ontrack fired, streams:", e.streams.length, "track:", e.track.kind, e.track.readyState);
       if (e.streams[0] && this.onStream) {
         this.onStream(e.streams[0]);
       }
     };
 
-    // Monitor connection state
     pc.onconnectionstatechange = () => {
-      console.log(LOG_PREFIX_VIEW, "connection state:", pc.connectionState);
-      if (this.onConnectionState) {
-        this.onConnectionState(pc.connectionState);
-      }
+      console.log(LOG_PREFIX_VIEW, this.viewerId, "connection state:", pc.connectionState);
+      if (this.onConnectionState) this.onConnectionState(pc.connectionState);
     };
 
-    pc.oniceconnectionstatechange = () => {
-      console.log(LOG_PREFIX_VIEW, "ICE connection state:", pc.iceConnectionState);
-    };
-
-    pc.onicegatheringstatechange = () => {
-      console.log(LOG_PREFIX_VIEW, "ICE gathering state:", pc.iceGatheringState);
-    };
-
-    // Send ICE candidates
-    let iceCandidateCount = 0;
     pc.onicecandidate = (e) => {
       if (e.candidate && !this.destroyed) {
-        iceCandidateCount++;
-        console.log(LOG_PREFIX_VIEW, `sending ICE candidate #${iceCandidateCount}:`, e.candidate.type, e.candidate.protocol, e.candidate.address);
         void this.channel.send({
           type: "broadcast",
           event: "signal",
-          payload: { type: "ice", candidate: e.candidate.toJSON() },
+          payload: {
+            type: "ice",
+            candidate: e.candidate.toJSON(),
+            viewerId: this.viewerId,
+            from: "viewer",
+          } satisfies SignalMessage,
         });
-      } else if (!e.candidate) {
-        console.log(LOG_PREFIX_VIEW, "ICE gathering complete, total candidates:", iceCandidateCount);
       }
     };
 
@@ -208,100 +196,79 @@ export class ViewerPeer {
   private init() {
     this.createPc();
 
-    // Listen for signals from camera
     this.channel
       .on("broadcast", { event: "signal" }, ({ payload }) => {
         if (this.destroyed) return;
         const msg = payload as SignalMessage;
-        console.log(LOG_PREFIX_VIEW, "received signal:", msg.type);
+        // Only react to messages addressed to us
+        if (msg.viewerId !== this.viewerId) return;
+        // Ignore ICE candidates that we sent ourselves
+        if (msg.type === "ice" && msg.from === "viewer") return;
+        console.log(LOG_PREFIX_VIEW, this.viewerId, "received signal:", msg.type);
         void this.handleSignal(msg);
       })
       .subscribe(async (status) => {
-        console.log(LOG_PREFIX_VIEW, "channel status:", status);
-        if (status === "SUBSCRIBED") {
-          await this.sendOffer();
-        }
+        console.log(LOG_PREFIX_VIEW, this.viewerId, "channel status:", status);
+        if (status === "SUBSCRIBED") await this.sendOffer();
       });
   }
 
   private async sendOffer() {
-    console.log(LOG_PREFIX_VIEW, `sending offer (attempt ${this.retryCount + 1}/${ViewerPeer.MAX_RETRIES + 1})`);
+    console.log(LOG_PREFIX_VIEW, this.viewerId, `sending offer (attempt ${this.retryCount + 1})`);
 
-    // Reset PC for a fresh offer
     if (this.retryCount > 0) {
       this.pc.ontrack = null;
       this.pc.onicecandidate = null;
       this.pc.onconnectionstatechange = null;
-      this.pc.oniceconnectionstatechange = null;
-      this.pc.onicegatheringstatechange = null;
       this.pc.close();
       this.pendingCandidates = [];
       this.createPc();
     }
 
-    // Add transceiver to receive video only (audio not needed — players use Discord)
     this.pc.addTransceiver("video", { direction: "recvonly" });
-
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
 
     void this.channel.send({
       type: "broadcast",
       event: "signal",
-      payload: { type: "offer", sdp: offer.sdp },
+      payload: { type: "offer", sdp: offer.sdp ?? "", viewerId: this.viewerId } satisfies SignalMessage,
     });
-    console.log(LOG_PREFIX_VIEW, "offer sent");
-
-    // Schedule retry if no answer received
     this.scheduleRetry();
   }
 
   private scheduleRetry() {
     if (this.retryTimer) clearTimeout(this.retryTimer);
-
     this.retryTimer = setTimeout(() => {
       if (this.destroyed || this.answerReceived) return;
-
       this.retryCount++;
-      console.log(LOG_PREFIX_VIEW, `no answer after ${ViewerPeer.RETRY_INTERVAL_MS}ms, retry ${this.retryCount}/${ViewerPeer.MAX_RETRIES}`);
-      if (this.retryCount <= ViewerPeer.MAX_RETRIES) {
-        void this.sendOffer();
-      } else {
-        console.log(LOG_PREFIX_VIEW, "max retries reached, giving up");
-      }
+      if (this.retryCount <= ViewerPeer.MAX_RETRIES) void this.sendOffer();
     }, ViewerPeer.RETRY_INTERVAL_MS);
   }
 
   private async handleSignal(msg: SignalMessage) {
     if (msg.type === "answer") {
-      console.log(LOG_PREFIX_VIEW, "received answer");
       this.answerReceived = true;
       if (this.retryTimer) {
         clearTimeout(this.retryTimer);
         this.retryTimer = null;
       }
-
       await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
-      console.log(LOG_PREFIX_VIEW, "set remote description (answer), flushing", this.pendingCandidates.length, "queued candidates");
-      // Flush any ICE candidates that arrived before the answer
       for (const candidate of this.pendingCandidates) {
         await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
       }
       this.pendingCandidates = [];
     } else if (msg.type === "ice") {
       if (this.pc.remoteDescription) {
-        console.log(LOG_PREFIX_VIEW, "adding remote ICE candidate");
         await this.pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
       } else {
-        console.log(LOG_PREFIX_VIEW, "queueing ICE candidate (no remote description yet)");
         this.pendingCandidates.push(msg.candidate);
       }
     }
-    // Viewer side ignores "offer" messages (those are from itself)
   }
 
   destroy() {
-    console.log(LOG_PREFIX_VIEW, "destroying");
+    console.log(LOG_PREFIX_VIEW, this.viewerId, "destroying");
     this.destroyed = true;
     if (this.retryTimer) {
       clearTimeout(this.retryTimer);
@@ -310,8 +277,6 @@ export class ViewerPeer {
     this.pc.ontrack = null;
     this.pc.onicecandidate = null;
     this.pc.onconnectionstatechange = null;
-    this.pc.oniceconnectionstatechange = null;
-    this.pc.onicegatheringstatechange = null;
     this.pc.close();
     void this.channel.unsubscribe();
   }
