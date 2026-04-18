@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { Press_Start_2P } from "next/font/google";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { subscribeToGame } from "@/lib/supabase/realtime";
@@ -15,8 +14,6 @@ import {
 import { createGameState, applyTurn, applyScoreTurn } from "@/lib/game/engine";
 import { calculateGameStatsForPlayer } from "@/lib/game/stats";
 import { BOT_PLAYER_ID } from "@/lib/game/bot";
-
-const pixelFont = Press_Start_2P({ subsets: ["latin"], weight: "400" });
 
 interface GameRow {
   id: string;
@@ -205,13 +202,10 @@ export default function BroadcastPage() {
   const p2Legs = state.legsWon[p2Id] ?? 0;
   const p1Sets = state.setsWon[p1Id] ?? 0;
   const p2Sets = state.setsWon[p2Id] ?? 0;
-  const leaderLabel = buildLeaderLabel(
-    gameRow.match_format,
-    names[p1Id] ?? "P1",
-    names[p2Id] ?? "P2",
-    gameRow.match_format === "sets" ? p1Sets : p1Legs,
-    gameRow.match_format === "sets" ? p2Sets : p2Legs
-  );
+  const legSetLabel =
+    gameRow.match_format === "sets"
+      ? `Set ${state.currentSet} · Leg ${state.currentLeg}`
+      : `Leg ${state.currentLeg}`;
 
   const activeId = isFinished ? null : state.currentPlayerId;
 
@@ -224,15 +218,13 @@ export default function BroadcastPage() {
         <BroadcastScaler />
 
         {/* Logo — top-left */}
-        <div className="absolute left-[15px] top-[30px] flex items-center gap-4 pl-2">
-          <TvLogo />
-          <div
-            className={`text-white ${pixelFont.className}`}
-            style={{ fontSize: 64, lineHeight: 1, letterSpacing: "0.02em" }}
-          >
-            DARTSTREAMER
-          </div>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/dartstreamer-logo.png"
+          alt="DartStreamer"
+          className="absolute"
+          style={{ left: 30, top: 40, width: 1120, height: "auto" }}
+        />
 
         {/* Vertical divider */}
         <div
@@ -258,12 +250,12 @@ export default function BroadcastPage() {
         {/* Header row above scores */}
         <div
           className="absolute flex items-center justify-between text-zinc-400"
-          style={{ left: 1250, top: 30, width: 650, height: 40 }}
+          style={{ left: 1250, top: 60, width: 650, height: 40 }}
         >
           <div className="text-[22px] font-bold tracking-widest text-white">
             {matchLabel}
           </div>
-          <div className="text-[18px] tracking-wide">{leaderLabel}</div>
+          <div className="text-[18px] tracking-wide">{legSetLabel}</div>
         </div>
 
         {/* Score card — Bill (left/P1) */}
@@ -275,6 +267,9 @@ export default function BroadcastPage() {
           last={p1Live.last}
           darts={p1Live.darts}
           active={activeId === p1Id}
+          legs={p1Legs}
+          sets={p1Sets}
+          showSets={gameRow.match_format === "sets"}
         />
         {/* Score card — Arthur (right/P2) */}
         <ScoreCard
@@ -285,6 +280,9 @@ export default function BroadcastPage() {
           last={p2Live.last}
           darts={p2Live.darts}
           active={activeId === p2Id}
+          legs={p2Legs}
+          sets={p2Sets}
+          showSets={gameRow.match_format === "sets"}
         />
 
         {/* Match Statistics panel */}
@@ -302,26 +300,6 @@ export default function BroadcastPage() {
 function numberWord(n: number): string {
   const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
   return words[n] ?? String(n);
-}
-
-function buildLeaderLabel(
-  format: "legs" | "sets",
-  p1: string,
-  p2: string,
-  p1Count: number,
-  p2Count: number
-) {
-  const unit = format === "sets" ? "set" : "leg";
-  if (p1Count === 0 && p2Count === 0) return `${p1} vs ${p2}`;
-  if (p1Count === p2Count) {
-    return `tied ${p1Count}-${p2Count}`;
-  }
-  const leader = p1Count > p2Count ? p1 : p2;
-  const hi = Math.max(p1Count, p2Count);
-  const lo = Math.min(p1Count, p2Count);
-  const plural = hi === 1 ? unit : `${unit}s`;
-  void plural;
-  return `${leader} leads ${hi}-${lo}`;
 }
 
 function PlayerCard({
@@ -351,7 +329,7 @@ function PlayerCard({
       >
         {nickname && (
           <div className="italic text-white" style={{ fontSize: 34, lineHeight: 1.1 }}>
-            The {nickname}
+            {nickname}
           </div>
         )}
         <div
@@ -373,6 +351,9 @@ function ScoreCard({
   last,
   darts,
   active,
+  legs,
+  sets,
+  showSets,
 }: {
   x: number;
   name: string;
@@ -381,21 +362,34 @@ function ScoreCard({
   last: number | null;
   darts: number;
   active: boolean;
+  legs: number;
+  sets: number;
+  showSets: boolean;
 }) {
   return (
     <div
       className={`absolute rounded-2xl bg-zinc-900 p-5 ${
         active ? "ring-2 ring-emerald-400" : ""
       }`}
-      style={{ left: x, top: 80, width: 315, height: 240 }}
+      style={{ left: x, top: 110, width: 315, height: 290 }}
     >
       <div className="flex items-start justify-between">
         <div className="text-[22px] font-semibold text-white">{name}</div>
         {active && <div className="mt-2 h-3 w-3 rounded-full bg-emerald-400" />}
       </div>
+      <div className="mt-1 flex items-center gap-4 text-[15px] tracking-wider text-zinc-400">
+        {showSets && (
+          <span>
+            SETS <span className="font-bold text-white">{sets}</span>
+          </span>
+        )}
+        <span>
+          LEGS <span className="font-bold text-white">{legs}</span>
+        </span>
+      </div>
       <div
         className="mt-1 font-black text-white"
-        style={{ fontSize: 72, lineHeight: 1 }}
+        style={{ fontSize: 68, lineHeight: 1 }}
       >
         {remaining}
       </div>
@@ -431,7 +425,7 @@ function MatchStatsPanel({
   return (
     <div
       className="absolute rounded-2xl bg-zinc-900 px-8 py-6"
-      style={{ left: 1250, top: 340, width: 650, height: 720 }}
+      style={{ left: 1250, top: 420, width: 650, height: 640 }}
     >
       <div className="text-center text-[18px] font-semibold tracking-[0.25em] text-zinc-300">
         MATCH STATISTICS
@@ -476,20 +470,6 @@ function StatBroadcastRow({
       <div className="w-1/3 text-center text-[15px] text-zinc-500">{label}</div>
       <div className="w-1/3 pl-4 font-semibold text-white">{v2}</div>
     </div>
-  );
-}
-
-function TvLogo() {
-  return (
-    <svg viewBox="0 0 120 110" width="140" height="130" xmlns="http://www.w3.org/2000/svg">
-      <rect x="6" y="18" width="108" height="82" rx="10" ry="10" fill="none" stroke="white" strokeWidth="6" />
-      <rect x="18" y="30" width="84" height="58" rx="4" ry="4" fill="white" />
-      <line x1="28" y1="18" x2="40" y2="4" stroke="white" strokeWidth="5" strokeLinecap="round" />
-      <line x1="72" y1="18" x2="60" y2="4" stroke="white" strokeWidth="5" strokeLinecap="round" />
-      <circle cx="84" cy="22" r="3" fill="#ef4444" />
-      <circle cx="94" cy="22" r="3" fill="#22c55e" />
-      <circle cx="104" cy="22" r="3" fill="#eab308" />
-    </svg>
   );
 }
 

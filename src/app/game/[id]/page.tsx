@@ -28,7 +28,7 @@ import { GameStatsDisplay } from "@/components/game/GameStatsDisplay";
 import { TurnHistory } from "@/components/game/TurnHistory";
 import { BOT_PLAYER_ID, generateBotScore } from "@/lib/game/bot";
 import { calculateGameStatsForPlayer } from "@/lib/game/stats";
-import { shouldShowDartsAtDoublePopup, getDartsAtDoubleOptions } from "@/lib/game/checkouts";
+import { shouldShowDartsAtDoublePopup, getDartsAtDoubleOptions, getMinDartsToFinish } from "@/lib/game/checkouts";
 import { DartsAtDoublePopup } from "@/components/scoring/DartsAtDoublePopup";
 import { CameraStatusIcon } from "@/components/game/CameraStatusIcon";
 import { DeviceCameraPopup } from "@/components/game/DeviceCameraPopup";
@@ -453,7 +453,12 @@ export default function GamePage() {
       if (!isX01State(gameState)) return;
 
       const remaining = gameState.scores[userId];
-      const checkedOut = score === remaining;
+      const newRemaining = remaining - score;
+      const checkedOut = newRemaining === 0;
+      const isBust =
+        newRemaining < 0 ||
+        (gameState.outMode !== "straight" && newRemaining === 1);
+      const min = getMinDartsToFinish(remaining);
 
       // Check if we need the darts-at-double popup
       if (shouldShowDartsAtDoublePopup(remaining)) {
@@ -461,6 +466,21 @@ export default function GamePage() {
         setPendingScore(score);
         setPendingCheckedOut(checkedOut);
         setDartsAtDoubleOptions(options);
+        setShowDartsAtDoublePopup(true);
+        return;
+      }
+
+      // 3-dart-only finish: implied 1 attempt at a double
+      if (min === 3 && checkedOut) {
+        commitX01Turn(score, 1, 3);
+        return;
+      }
+
+      // 3-dart-only finish that busted: player may have attempted a double
+      if (min === 3 && isBust) {
+        setPendingScore(score);
+        setPendingCheckedOut(false);
+        setDartsAtDoubleOptions([0, 1]);
         setShowDartsAtDoublePopup(true);
         return;
       }
