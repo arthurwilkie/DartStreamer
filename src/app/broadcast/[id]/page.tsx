@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { Press_Start_2P } from "next/font/google";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { subscribeToGame } from "@/lib/supabase/realtime";
@@ -12,8 +13,10 @@ import {
   isX01State,
 } from "@/lib/game/types";
 import { createGameState, applyTurn, applyScoreTurn } from "@/lib/game/engine";
-import { getCheckoutSuggestion } from "@/lib/game/rules/x01";
+import { calculateGameStatsForPlayer } from "@/lib/game/stats";
 import { BOT_PLAYER_ID } from "@/lib/game/bot";
+
+const pixelFont = Press_Start_2P({ subsets: ["latin"], weight: "400" });
 
 interface GameRow {
   id: string;
@@ -37,6 +40,8 @@ interface TurnRow {
   player_id: string;
   score_entered: number;
   darts_detail: Dart[] | CricketDart[] | [];
+  darts_at_double?: number | null;
+  darts_for_checkout?: number | null;
 }
 
 export default function BroadcastPage() {
@@ -47,9 +52,8 @@ export default function BroadcastPage() {
   const [gameRow, setGameRow] = useState<GameRow | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
-  const [avatars, setAvatars] = useState<Record<string, string | null>>({});
+  const [nicknames, setNicknames] = useState<Record<string, string | null>>({});
 
-  // Initial load
   useEffect(() => {
     async function load() {
       const { data: game } = await supabase
@@ -63,20 +67,20 @@ export default function BroadcastPage() {
 
       const { data: players } = await supabase
         .from("players")
-        .select("id, display_name, avatar_url")
+        .select("id, display_name, nickname")
         .in("id", [game.player1_id, game.player2_id]);
 
       const n: Record<string, string> = {};
-      const a: Record<string, string | null> = {};
+      const nk: Record<string, string | null> = {};
       players?.forEach((p) => {
         n[p.id] =
           p.id === BOT_PLAYER_ID && game.bot_level != null
             ? `DartBot ${game.bot_level}`
             : p.display_name;
-        a[p.id] = p.avatar_url;
+        nk[p.id] = p.nickname ?? null;
       });
       setNames(n);
-      setAvatars(a);
+      setNicknames(nk);
 
       const { data: turns } = await supabase
         .from("turns")
@@ -100,11 +104,14 @@ export default function BroadcastPage() {
       for (const t of turns ?? []) {
         const darts = t.darts_detail as Dart[] | CricketDart[];
         if (isX01State(state) && (!darts || (darts as Dart[]).length === 0)) {
-          const { newState } = applyScoreTurn(state, t.player_id, t.score_entered);
-          state = newState;
+          state = applyScoreTurn(state, t.player_id, t.score_entered).newState;
         } else {
-          const { newState } = applyTurn(state, t.player_id, darts);
-          state = newState;
+          state = applyTurn(state, t.player_id, darts).newState;
+        }
+        const last = state.turns[state.turns.length - 1];
+        if (last) {
+          last.dartsAtDouble = t.darts_at_double ?? null;
+          last.dartsForCheckout = t.darts_for_checkout ?? null;
         }
       }
       setGameState(state);
@@ -112,7 +119,6 @@ export default function BroadcastPage() {
     load();
   }, [gameId, supabase]);
 
-  // Realtime updates
   useEffect(() => {
     if (!gameRow) return;
     const channel = subscribeToGame(
@@ -124,12 +130,18 @@ export default function BroadcastPage() {
         setGameState((prev) => {
           if (!prev) return prev;
           const darts = t.darts_detail;
+          let next;
           if (isX01State(prev) && (!darts || (darts as Dart[]).length === 0)) {
-            const { newState } = applyScoreTurn(prev, t.player_id, t.score_entered);
-            return newState;
+            next = applyScoreTurn(prev, t.player_id, t.score_entered).newState;
+          } else {
+            next = applyTurn(prev, t.player_id, darts).newState;
           }
-          const { newState } = applyTurn(prev, t.player_id, darts);
-          return newState;
+          const last = next.turns[next.turns.length - 1];
+          if (last) {
+            last.dartsAtDouble = t.darts_at_double ?? null;
+            last.dartsForCheckout = t.darts_for_checkout ?? null;
+          }
+          return next;
         });
       }
     );
@@ -149,9 +161,10 @@ export default function BroadcastPage() {
   const state = gameState;
   const p1Id = gameRow.player1_id;
   const p2Id = gameRow.player2_id;
+  const startingScore = state.startingScore;
 
-  function playerStats(playerId: string) {
-    const turns = state.turns.filter((t) => t.playerId === playerId);
+  function liveStats(pid: string) {
+    const turns = state.turns.filter((t) => t.playerId === pid);
     let darts = 0;
     let score = 0;
     for (const t of turns) {
@@ -165,184 +178,321 @@ export default function BroadcastPage() {
     return { avg, last, darts };
   }
 
-  const matchLabel =
-    gameRow.match_format === "sets"
-      ? `BEST OF ${gameRow.target} SETS`
-      : `BEST OF ${gameRow.target} LEGS`;
-
-  const inOutLabel = `${gameRow.in_mode.toUpperCase()}-IN ${gameRow.out_mode.toUpperCase()}-OUT`;
+  const p1Live = liveStats(p1Id);
+  const p2Live = liveStats(p2Id);
+  const p1Stats = calculateGameStatsForPlayer(
+    state.turns,
+    p1Id,
+    gameRow.mode,
+    gameRow.winner_id === p1Id,
+    startingScore
+  );
+  const p2Stats = calculateGameStatsForPlayer(
+    state.turns,
+    p2Id,
+    gameRow.mode,
+    gameRow.winner_id === p2Id,
+    startingScore
+  );
 
   const isFinished = gameRow.status === "finished";
+  const matchLabel =
+    gameRow.match_format === "sets"
+      ? `${startingScore} - BEST OF ${String(gameRow.target).toUpperCase()} SETS`
+      : `${startingScore} - BEST OF ${numberWord(gameRow.target).toUpperCase()} LEGS`;
+
+  const p1Legs = state.legsWon[p1Id] ?? 0;
+  const p2Legs = state.legsWon[p2Id] ?? 0;
+  const p1Sets = state.setsWon[p1Id] ?? 0;
+  const p2Sets = state.setsWon[p2Id] ?? 0;
+  const leaderLabel = buildLeaderLabel(
+    gameRow.match_format,
+    names[p1Id] ?? "P1",
+    names[p2Id] ?? "P2",
+    gameRow.match_format === "sets" ? p1Sets : p1Legs,
+    gameRow.match_format === "sets" ? p2Sets : p2Legs
+  );
+
+  const activeId = isFinished ? null : state.currentPlayerId;
 
   return (
     <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-black">
-      {/* Fixed 1920x1080 canvas for consistent capture */}
       <div
-        className="relative origin-center"
-        style={{
-          width: 1920,
-          height: 1080,
-          transform: "scale(var(--scale, 1))",
-        }}
+        className="relative origin-center bg-black"
+        style={{ width: 1920, height: 1080, transform: "scale(var(--scale, 1))" }}
       >
         <BroadcastScaler />
 
-        {/* Background gradient */}
-        <div className="absolute inset-0 bg-gradient-to-br from-zinc-950 via-zinc-900 to-black" />
-
-        {/* Header strip */}
-        <div className="absolute inset-x-0 top-0 flex items-center justify-between px-12 py-8">
-          <div>
-            <div className="text-3xl font-black tracking-widest text-emerald-400">
-              {gameRow.mode.toUpperCase()}
-            </div>
-            <div className="mt-1 text-sm font-medium tracking-[0.3em] text-zinc-500">
-              {inOutLabel}
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold tracking-wider text-white">
-              {matchLabel}
-            </div>
-            <div className="mt-1 text-sm tracking-widest text-zinc-400">
-              {gameRow.match_format === "sets"
-                ? `SET ${state.currentSet} · LEG ${state.currentLeg}`
-                : `LEG ${state.currentLeg}`}
-            </div>
+        {/* Logo — top-left */}
+        <div className="absolute left-[15px] top-[30px] flex items-center gap-4 pl-2">
+          <TvLogo />
+          <div
+            className={`text-white ${pixelFont.className}`}
+            style={{ fontSize: 64, lineHeight: 1, letterSpacing: "0.02em" }}
+          >
+            DARTSTREAMER
           </div>
         </div>
 
-        {/* Main content: two player panels */}
-        <div className="absolute inset-x-12 top-48 bottom-32 grid grid-cols-2 gap-10">
-          {[p1Id, p2Id].map((pid) => {
-            const isActive = pid === state.currentPlayerId && !isFinished;
-            const isWinner = gameRow.winner_id === pid;
-            const remaining = state.scores[pid];
-            const stats = playerStats(pid);
-            const checkout =
-              isActive && remaining <= 170
-                ? getCheckoutSuggestion(remaining)
-                : null;
+        {/* Vertical divider */}
+        <div
+          className="absolute bg-zinc-800"
+          style={{ left: 1220, top: 0, width: 6, height: 1080 }}
+        />
 
-            return (
-              <div
-                key={pid}
-                className={`relative flex flex-col rounded-3xl border-2 p-10 transition-all ${
-                  isWinner
-                    ? "border-yellow-400 bg-yellow-500/10"
-                    : isActive
-                    ? "border-emerald-400 bg-emerald-500/5 shadow-[0_0_60px_rgba(16,185,129,0.25)]"
-                    : "border-zinc-800 bg-zinc-900/60"
-                }`}
-              >
-                {/* Avatar + name */}
-                <div className="flex items-center gap-6">
-                  {avatars[pid] ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={avatars[pid] ?? ""}
-                      alt=""
-                      className="h-24 w-24 rounded-full border-2 border-zinc-700"
-                    />
-                  ) : (
-                    <div className="flex h-24 w-24 items-center justify-center rounded-full bg-zinc-800 text-4xl font-bold text-white">
-                      {(names[pid] ?? "?").charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                  <div className="flex-1">
-                    <div className="text-4xl font-black text-white">
-                      {names[pid] ?? "Player"}
-                    </div>
-                    <div className="mt-2 flex items-center gap-4 text-2xl font-bold">
-                      {gameRow.match_format === "sets" && (
-                        <span className="text-zinc-400">
-                          SETS{" "}
-                          <span className="text-white">{state.setsWon[pid] ?? 0}</span>
-                        </span>
-                      )}
-                      <span className="text-zinc-400">
-                        LEGS{" "}
-                        <span className="text-white">{state.legsWon[pid] ?? 0}</span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
+        {/* Player 1 card */}
+        <PlayerCard
+          x={15}
+          displayName={names[p1Id] ?? "Player 1"}
+          nickname={nicknames[p1Id]}
+          cameraX={30}
+        />
+        {/* Player 2 card */}
+        <PlayerCard
+          x={615}
+          displayName={names[p2Id] ?? "Player 2"}
+          nickname={nicknames[p2Id]}
+          cameraX={630}
+        />
 
-                {/* Big remaining score */}
-                <div className="mt-12 flex flex-1 items-center justify-center">
-                  <div
-                    className={`text-[220px] font-black leading-none tracking-tighter ${
-                      isActive ? "text-emerald-300" : "text-white"
-                    }`}
-                  >
-                    {remaining}
-                  </div>
-                </div>
-
-                {/* Checkout hint */}
-                <div className="flex h-10 items-center justify-center">
-                  {checkout && (
-                    <div className="text-2xl font-bold tracking-widest text-amber-300">
-                      {checkout}
-                    </div>
-                  )}
-                </div>
-
-                {/* Bottom stats row */}
-                <div className="mt-8 grid grid-cols-3 gap-4 border-t border-zinc-800 pt-6 text-center">
-                  <div>
-                    <div className="text-xs tracking-widest text-zinc-500">AVG</div>
-                    <div className="mt-1 text-3xl font-bold text-white">
-                      {stats.avg.toFixed(1)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs tracking-widest text-zinc-500">LAST</div>
-                    <div className="mt-1 text-3xl font-bold text-white">
-                      {stats.last ?? "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs tracking-widest text-zinc-500">DARTS</div>
-                    <div className="mt-1 text-3xl font-bold text-white">
-                      {stats.darts}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Needs double-in flag */}
-                {state.inMode !== "straight" && !state.hasDoubledIn[pid] && (
-                  <div className="absolute right-6 top-6 rounded-full bg-amber-500/20 px-4 py-1 text-sm font-bold tracking-wider text-amber-300">
-                    NEEDS {state.inMode === "double" ? "DOUBLE" : "DOUBLE/TRIPLE"}-IN
-                  </div>
-                )}
-
-                {isWinner && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-full bg-yellow-400 px-6 py-2 text-lg font-black tracking-widest text-black">
-                    WINNER
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Footer strip */}
-        <div className="absolute inset-x-12 bottom-0 flex items-center justify-between py-8 text-sm tracking-widest text-zinc-500">
-          <div>ROUND {state.currentRound}</div>
-          <div>
-            {isFinished
-              ? "MATCH COMPLETE"
-              : `${names[state.currentPlayerId] ?? "Player"} TO THROW`}
+        {/* Header row above scores */}
+        <div
+          className="absolute flex items-center justify-between text-zinc-400"
+          style={{ left: 1250, top: 30, width: 650, height: 40 }}
+        >
+          <div className="text-[22px] font-bold tracking-widest text-white">
+            {matchLabel}
           </div>
-          <div>DARTSTREAMER</div>
+          <div className="text-[18px] tracking-wide">{leaderLabel}</div>
         </div>
+
+        {/* Score card — Bill (left/P1) */}
+        <ScoreCard
+          x={1250}
+          name={names[p1Id] ?? "Player 1"}
+          remaining={state.scores[p1Id]}
+          avg={p1Live.avg}
+          last={p1Live.last}
+          darts={p1Live.darts}
+          active={activeId === p1Id}
+        />
+        {/* Score card — Arthur (right/P2) */}
+        <ScoreCard
+          x={1585}
+          name={names[p2Id] ?? "Player 2"}
+          remaining={state.scores[p2Id]}
+          avg={p2Live.avg}
+          last={p2Live.last}
+          darts={p2Live.darts}
+          active={activeId === p2Id}
+        />
+
+        {/* Match Statistics panel */}
+        <MatchStatsPanel
+          p1Name={names[p1Id] ?? "Player 1"}
+          p2Name={names[p2Id] ?? "Player 2"}
+          p1={p1Stats}
+          p2={p2Stats}
+        />
       </div>
     </div>
   );
 }
 
-// Auto-scales the 1920x1080 canvas to fit the viewport.
+function numberWord(n: number): string {
+  const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+  return words[n] ?? String(n);
+}
+
+function buildLeaderLabel(
+  format: "legs" | "sets",
+  p1: string,
+  p2: string,
+  p1Count: number,
+  p2Count: number
+) {
+  const unit = format === "sets" ? "set" : "leg";
+  if (p1Count === 0 && p2Count === 0) return `${p1} vs ${p2}`;
+  if (p1Count === p2Count) {
+    return `tied ${p1Count}-${p2Count}`;
+  }
+  const leader = p1Count > p2Count ? p1 : p2;
+  const hi = Math.max(p1Count, p2Count);
+  const lo = Math.min(p1Count, p2Count);
+  const plural = hi === 1 ? unit : `${unit}s`;
+  void plural;
+  return `${leader} leads ${hi}-${lo}`;
+}
+
+function PlayerCard({
+  x,
+  displayName,
+  nickname,
+  cameraX,
+}: {
+  x: number;
+  displayName: string;
+  nickname: string | null;
+  cameraX: number;
+}) {
+  return (
+    <>
+      <div
+        className="absolute rounded-2xl bg-zinc-900"
+        style={{ left: x, top: 240, width: 585, height: 820 }}
+      />
+      <div
+        className="absolute rounded-[22px] bg-orange-500"
+        style={{ left: cameraX, top: 255, width: 555, height: 555 }}
+      />
+      <div
+        className="absolute flex flex-col items-center justify-start"
+        style={{ left: x, top: 830, width: 585 }}
+      >
+        {nickname && (
+          <div className="italic text-white" style={{ fontSize: 34, lineHeight: 1.1 }}>
+            The {nickname}
+          </div>
+        )}
+        <div
+          className="mt-1 text-center font-black text-white"
+          style={{ fontSize: 64, lineHeight: 1.05 }}
+        >
+          {displayName}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ScoreCard({
+  x,
+  name,
+  remaining,
+  avg,
+  last,
+  darts,
+  active,
+}: {
+  x: number;
+  name: string;
+  remaining: number;
+  avg: number;
+  last: number | null;
+  darts: number;
+  active: boolean;
+}) {
+  return (
+    <div
+      className={`absolute rounded-2xl bg-zinc-900 p-5 ${
+        active ? "ring-2 ring-emerald-400" : ""
+      }`}
+      style={{ left: x, top: 80, width: 315, height: 240 }}
+    >
+      <div className="flex items-start justify-between">
+        <div className="text-[22px] font-semibold text-white">{name}</div>
+        {active && <div className="mt-2 h-3 w-3 rounded-full bg-emerald-400" />}
+      </div>
+      <div
+        className="mt-1 font-black text-white"
+        style={{ fontSize: 72, lineHeight: 1 }}
+      >
+        {remaining}
+      </div>
+      <div className="mt-3 space-y-1 text-[16px] text-zinc-400">
+        <StatLine label="3-dart avg." value={avg.toFixed(2)} />
+        <StatLine label="Last score" value={last != null ? String(last) : "—"} />
+        <StatLine label="Darts thrown" value={String(darts)} />
+      </div>
+    </div>
+  );
+}
+
+function StatLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between">
+      <span>{label}</span>
+      <span className="text-white">{value}</span>
+    </div>
+  );
+}
+
+function MatchStatsPanel({
+  p1Name,
+  p2Name,
+  p1,
+  p2,
+}: {
+  p1Name: string;
+  p2Name: string;
+  p1: ReturnType<typeof calculateGameStatsForPlayer>;
+  p2: ReturnType<typeof calculateGameStatsForPlayer>;
+}) {
+  return (
+    <div
+      className="absolute rounded-2xl bg-zinc-900 px-8 py-6"
+      style={{ left: 1250, top: 340, width: 650, height: 720 }}
+    >
+      <div className="text-center text-[18px] font-semibold tracking-[0.25em] text-zinc-300">
+        MATCH STATISTICS
+      </div>
+
+      <div className="mt-4 flex items-center border-b border-zinc-700 pb-3 text-[20px] font-bold">
+        <div className="w-1/3 text-right pr-4 text-white">{p1Name}</div>
+        <div className="w-1/3 text-center text-sm text-zinc-500">vs</div>
+        <div className="w-1/3 pl-4 text-white">{p2Name}</div>
+      </div>
+
+      <StatBroadcastRow label="3-Dart Avg" v1={p1.threeDartAvg.toFixed(2)} v2={p2.threeDartAvg.toFixed(2)} />
+      <StatBroadcastRow label="First 9 Avg" v1={p1.first9Avg.toFixed(2)} v2={p2.first9Avg.toFixed(2)} />
+      <StatBroadcastRow label="High Checkout" v1={String(p1.highCheckout)} v2={String(p2.highCheckout)} />
+      <StatBroadcastRow
+        label="Checkout %"
+        v1={p1.dartsAtDouble > 0 ? `${p1.checkoutsHit}/${p1.dartsAtDouble} (${p1.checkoutPct.toFixed(0)}%)` : "—"}
+        v2={p2.dartsAtDouble > 0 ? `${p2.checkoutsHit}/${p2.dartsAtDouble} (${p2.checkoutPct.toFixed(0)}%)` : "—"}
+      />
+      <StatBroadcastRow label="180s" v1={String(p1.count180)} v2={String(p2.count180)} />
+      <StatBroadcastRow label="120+" v1={String(p1.c120Plus)} v2={String(p2.c120Plus)} />
+      <StatBroadcastRow label="100+" v1={String(p1.c100Plus)} v2={String(p2.c100Plus)} />
+      <StatBroadcastRow label="80+" v1={String(p1.c80Plus)} v2={String(p2.c80Plus)} />
+      <StatBroadcastRow label="60+" v1={String(p1.c60Plus)} v2={String(p2.c60Plus)} />
+      <StatBroadcastRow label="40+" v1={String(p1.c40Plus)} v2={String(p2.c40Plus)} />
+    </div>
+  );
+}
+
+function StatBroadcastRow({
+  label,
+  v1,
+  v2,
+}: {
+  label: string;
+  v1: string;
+  v2: string;
+}) {
+  return (
+    <div className="flex items-center border-b border-zinc-800 py-[10px] text-[20px]">
+      <div className="w-1/3 text-right pr-4 font-semibold text-white">{v1}</div>
+      <div className="w-1/3 text-center text-[15px] text-zinc-500">{label}</div>
+      <div className="w-1/3 pl-4 font-semibold text-white">{v2}</div>
+    </div>
+  );
+}
+
+function TvLogo() {
+  return (
+    <svg viewBox="0 0 120 110" width="140" height="130" xmlns="http://www.w3.org/2000/svg">
+      <rect x="6" y="18" width="108" height="82" rx="10" ry="10" fill="none" stroke="white" strokeWidth="6" />
+      <rect x="18" y="30" width="84" height="58" rx="4" ry="4" fill="white" />
+      <line x1="28" y1="18" x2="40" y2="4" stroke="white" strokeWidth="5" strokeLinecap="round" />
+      <line x1="72" y1="18" x2="60" y2="4" stroke="white" strokeWidth="5" strokeLinecap="round" />
+      <circle cx="84" cy="22" r="3" fill="#ef4444" />
+      <circle cx="94" cy="22" r="3" fill="#22c55e" />
+      <circle cx="104" cy="22" r="3" fill="#eab308" />
+    </svg>
+  );
+}
+
 function BroadcastScaler() {
   useEffect(() => {
     function apply() {
