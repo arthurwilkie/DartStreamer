@@ -1,0 +1,13 @@
+# Replace control.example.com with the DNS name pointing at this VPS.
+# Caddy will obtain and renew a Let's Encrypt cert automatically (needs
+# ports 80 and 443 reachable from the public internet).
+
+control.example.com {
+	reverse_proxy control:4100
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
+}

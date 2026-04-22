@@ -31,6 +31,7 @@ import { calculateGameStatsForPlayer } from "@/lib/game/stats";
 import { shouldShowDartsAtDoublePopup, getDartsAtDoubleOptions, getMinDartsToFinish } from "@/lib/game/checkouts";
 import { DartsAtDoublePopup } from "@/components/scoring/DartsAtDoublePopup";
 import { CameraStatusIcon } from "@/components/game/CameraStatusIcon";
+import { StreamControlButton } from "@/components/game/StreamControlButton";
 import { DeviceCameraPopup } from "@/components/game/DeviceCameraPopup";
 import { OpponentCameraFeed } from "@/components/game/OpponentCameraFeed";
 import { useSession } from "@/lib/session/SessionContext";
@@ -573,9 +574,10 @@ export default function GamePage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="mx-auto max-w-md px-4 py-4">
-        {/* Top bar: broadcast link + camera status */}
+        {/* Top bar: stream controls + broadcast link + camera status */}
         {!isFinished && (
           <div className="flex items-center justify-end gap-3">
+            {!isBotGame && <StreamControlButton gameId={gameId} />}
             <a
               href={`/broadcast/${gameId}`}
               target="_blank"

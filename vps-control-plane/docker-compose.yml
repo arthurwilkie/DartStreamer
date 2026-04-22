@@ -1,0 +1,29 @@
+services:
+  control:
+    build: .
+    image: dartstreamer-vps-control-plane
+    container_name: dartstreamer-control
+    restart: unless-stopped
+    shm_size: 1g
+    environment:
+      VPS_CONTROL_SECRET: ${VPS_CONTROL_SECRET:?set VPS_CONTROL_SECRET in .env}
+    expose:
+      - "4100"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: dartstreamer-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - control
+
+volumes:
+  caddy_data:
+  caddy_config:
