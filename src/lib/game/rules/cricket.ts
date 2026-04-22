@@ -6,6 +6,8 @@ import {
   type GameConfig,
   type Turn,
   CRICKET_NUMBERS,
+  LEGS_PER_SET,
+  targetToWin,
 } from "../types";
 
 function createPlayerState(): CricketPlayerState {
@@ -17,15 +19,32 @@ function createPlayerState(): CricketPlayerState {
 }
 
 export function createCricketState(config: GameConfig): CricketGameState {
+  const legStarterId = config.legStarterId ?? config.player1Id;
   return {
     mode: "cricket",
+    player1Id: config.player1Id,
+    player2Id: config.player2Id,
+    matchFormat: config.matchFormat ?? "legs",
+    target: config.target ?? 1,
     players: {
       [config.player1Id]: createPlayerState(),
       [config.player2Id]: createPlayerState(),
     },
-    currentPlayerId: config.player1Id,
+    legsWon: {
+      [config.player1Id]: 0,
+      [config.player2Id]: 0,
+    },
+    setsWon: {
+      [config.player1Id]: 0,
+      [config.player2Id]: 0,
+    },
+    currentLeg: 1,
+    currentSet: 1,
+    legStarterId,
+    currentPlayerId: legStarterId,
     currentRound: 1,
     turns: [],
+    matchWinnerId: null,
   };
 }
 
@@ -35,8 +54,30 @@ export interface CricketTurnResult {
   marksAdded: Record<number, number>;
   pointsScored: number;
   numbersClosed: number[];
-  gameOver: boolean;
-  winnerId?: string;
+  legEnded: boolean;
+  legWinnerId: string | null;
+  setEnded: boolean;
+  setWinnerId: string | null;
+  matchOver: boolean;
+  matchWinnerId: string | null;
+  gameOver: boolean; // legacy alias for matchOver
+  winnerId?: string; // legacy alias for matchWinnerId
+}
+
+function emptyCricketResult(): CricketTurnResult {
+  return {
+    valid: false,
+    marksAdded: {},
+    pointsScored: 0,
+    numbersClosed: [],
+    legEnded: false,
+    legWinnerId: null,
+    setEnded: false,
+    setWinnerId: null,
+    matchOver: false,
+    matchWinnerId: null,
+    gameOver: false,
+  };
 }
 
 export function validateAndApplyCricketTurn(
@@ -45,44 +86,26 @@ export function validateAndApplyCricketTurn(
   darts: CricketDart[]
 ): CricketTurnResult {
   if (playerId !== state.currentPlayerId) {
-    return {
-      valid: false,
-      error: "Not your turn",
-      marksAdded: {},
-      pointsScored: 0,
-      numbersClosed: [],
-      gameOver: false,
-    };
+    return { ...emptyCricketResult(), error: "Not your turn" };
   }
 
   if (darts.length === 0 || darts.length > 3) {
-    return {
-      valid: false,
-      error: "Must throw 1-3 darts",
-      marksAdded: {},
-      pointsScored: 0,
-      numbersClosed: [],
-      gameOver: false,
-    };
+    return { ...emptyCricketResult(), error: "Must throw 1-3 darts" };
   }
 
-  // Validate dart targets
   for (const dart of darts) {
-    if (!CRICKET_NUMBERS.includes(dart.number as (typeof CRICKET_NUMBERS)[number]) && dart.marks > 0) {
+    if (
+      !CRICKET_NUMBERS.includes(dart.number as (typeof CRICKET_NUMBERS)[number]) &&
+      dart.marks > 0
+    ) {
       return {
-        valid: false,
+        ...emptyCricketResult(),
         error: `Invalid cricket number: ${dart.number}`,
-        marksAdded: {},
-        pointsScored: 0,
-        numbersClosed: [],
-        gameOver: false,
       };
     }
   }
 
-  const otherPlayerId = Object.keys(state.players).find(
-    (id) => id !== playerId
-  )!;
+  const otherPlayerId = Object.keys(state.players).find((id) => id !== playerId)!;
   const playerState = state.players[playerId];
   const opponentState = state.players[otherPlayerId];
 
@@ -94,9 +117,9 @@ export function validateAndApplyCricketTurn(
     if (dart.marks === 0) continue;
 
     const num = dart.number;
-    const currentMarks = (playerState.numbers[num]?.marks ?? 0) + (marksAdded[num] ?? 0);
+    const currentMarks =
+      (playerState.numbers[num]?.marks ?? 0) + (marksAdded[num] ?? 0);
 
-    // Skip if this number is closed by both players
     if (playerState.numbers[num]?.closed && opponentState.numbers[num]?.closed) {
       continue;
     }
@@ -107,16 +130,13 @@ export function validateAndApplyCricketTurn(
 
     marksAdded[num] = (marksAdded[num] ?? 0) + dart.marks;
 
-    // Points: score if player has closed the number but opponent hasn't
     const willBeClosed = currentMarks + dart.marks >= 3;
     const opponentClosed = opponentState.numbers[num]?.closed;
 
     if (willBeClosed && !opponentClosed && extraMarks > 0) {
-      // Score points for extra marks beyond closing
       const pointValue = num === 25 ? 25 : num;
       pointsScored += pointValue * extraMarks;
     } else if (currentMarks >= 3 && !opponentClosed) {
-      // Already closed by this player, opponent hasn't — score all marks as points
       const pointValue = num === 25 ? 25 : num;
       pointsScored += pointValue * dart.marks;
     }
@@ -127,11 +147,11 @@ export function validateAndApplyCricketTurn(
   }
 
   return {
+    ...emptyCricketResult(),
     valid: true,
     marksAdded,
     pointsScored,
     numbersClosed,
-    gameOver: false, // Will be checked after applying
   };
 }
 
@@ -146,9 +166,7 @@ export function applyCricketTurn(
     return { newState: state, result };
   }
 
-  const otherPlayerId = Object.keys(state.players).find(
-    (id) => id !== playerId
-  )!;
+  const otherPlayerId = Object.keys(state.players).find((id) => id !== playerId)!;
 
   // Deep clone player states
   const newPlayers = JSON.parse(JSON.stringify(state.players)) as Record<
@@ -157,7 +175,6 @@ export function applyCricketTurn(
   >;
   const playerState = newPlayers[playerId];
 
-  // Apply marks
   for (const [numStr, marks] of Object.entries(result.marksAdded)) {
     const num = parseInt(numStr);
     playerState.numbers[num].marks += marks;
@@ -166,22 +183,8 @@ export function applyCricketTurn(
     }
   }
 
-  // Apply points
   playerState.points += result.pointsScored;
 
-  // Check game over: a player wins if they've closed all numbers AND
-  // have equal or more points than the opponent
-  const allClosedByPlayer = CRICKET_NUMBERS.every(
-    (n) => playerState.numbers[n].closed
-  );
-  const opponentPoints = newPlayers[otherPlayerId].points;
-
-  if (allClosedByPlayer && playerState.points >= opponentPoints) {
-    result.gameOver = true;
-    result.winnerId = playerId;
-  }
-
-  // Calculate score for the turn record
   const totalMarks = Object.values(result.marksAdded).reduce(
     (sum, m) => sum + m,
     0
@@ -191,21 +194,113 @@ export function applyCricketTurn(
     gameId: "",
     playerId,
     roundNumber: state.currentRound,
+    legNumber: state.currentLeg,
+    setNumber: state.currentSet,
     scoreEntered: totalMarks + result.pointsScored,
     dartsDetail: darts,
     isEdited: false,
   };
 
-  const isPlayer1 = playerId === Object.keys(state.players)[0];
-  const newRound = !isPlayer1 ? state.currentRound + 1 : state.currentRound;
+  const turns = [...state.turns, turn];
 
-  const newState: CricketGameState = {
-    ...state,
-    players: newPlayers,
-    currentPlayerId: result.gameOver ? playerId : otherPlayerId,
-    currentRound: result.gameOver ? state.currentRound : newRound,
-    turns: [...state.turns, turn],
+  // Check leg win: all numbers closed by this player AND points >= opponent's
+  const allClosedByPlayer = CRICKET_NUMBERS.every(
+    (n) => playerState.numbers[n].closed
+  );
+  const opponentPoints = newPlayers[otherPlayerId].points;
+  const legWon = allClosedByPlayer && playerState.points >= opponentPoints;
+
+  if (legWon) {
+    const legsWon = {
+      ...state.legsWon,
+      [playerId]: state.legsWon[playerId] + 1,
+    };
+    let setsWon = { ...state.setsWon };
+    let currentSet = state.currentSet;
+    let setEnded = false;
+    let setWinnerId: string | null = null;
+
+    if (state.matchFormat === "sets" && legsWon[playerId] >= LEGS_PER_SET) {
+      setEnded = true;
+      setWinnerId = playerId;
+      setsWon = { ...setsWon, [playerId]: setsWon[playerId] + 1 };
+      legsWon[state.player1Id] = 0;
+      legsWon[state.player2Id] = 0;
+      currentSet += 1;
+    }
+
+    let matchWinnerId: string | null = null;
+    const winsNeeded = targetToWin(state.target);
+    if (state.matchFormat === "legs" && legsWon[playerId] >= winsNeeded) {
+      matchWinnerId = playerId;
+    } else if (state.matchFormat === "sets" && setsWon[playerId] >= winsNeeded) {
+      matchWinnerId = playerId;
+    }
+
+    const finalResult: CricketTurnResult = {
+      ...result,
+      legEnded: true,
+      legWinnerId: playerId,
+      setEnded,
+      setWinnerId,
+      matchOver: matchWinnerId !== null,
+      matchWinnerId,
+      gameOver: matchWinnerId !== null,
+      winnerId: matchWinnerId ?? undefined,
+    };
+
+    if (matchWinnerId) {
+      return {
+        newState: {
+          ...state,
+          players: newPlayers,
+          legsWon,
+          setsWon,
+          currentSet,
+          turns,
+          matchWinnerId,
+        },
+        result: finalResult,
+      };
+    }
+
+    // Start the next leg: reset marks+points, flip leg starter
+    const nextStarter =
+      state.legStarterId === state.player1Id ? state.player2Id : state.player1Id;
+    const freshPlayers: Record<string, CricketPlayerState> = {
+      [state.player1Id]: createPlayerState(),
+      [state.player2Id]: createPlayerState(),
+    };
+
+    return {
+      newState: {
+        ...state,
+        players: freshPlayers,
+        legsWon,
+        setsWon,
+        currentSet,
+        currentLeg: state.currentLeg + 1,
+        legStarterId: nextStarter,
+        currentPlayerId: nextStarter,
+        currentRound: 1,
+        turns,
+      },
+      result: finalResult,
+    };
+  }
+
+  // Normal turn — advance to other player
+  const isLegStarter = playerId === state.legStarterId;
+  const newRound = isLegStarter ? state.currentRound : state.currentRound + 1;
+
+  return {
+    newState: {
+      ...state,
+      players: newPlayers,
+      currentPlayerId: otherPlayerId,
+      currentRound: newRound,
+      turns,
+    },
+    result,
   };
-
-  return { newState, result };
 }

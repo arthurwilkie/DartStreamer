@@ -1,3 +1,6 @@
+import type { CricketDart, CricketGameState } from "./types";
+import { CRICKET_NUMBERS } from "./types";
+
 /**
  * DartBot — generates realistic scores based on difficulty level (1-10).
  *
@@ -130,4 +133,91 @@ export function generateBotScore(level: number, remaining: number): number {
   }
 
   return score;
+}
+
+/**
+ * Per-level per-dart outcome distribution for Cricket hits on a chosen target
+ * number. Values are probabilities of {triple, double, single, miss} when
+ * aiming at the triple ring of the target.
+ */
+const CRICKET_LEVEL_DIST: Record<number, { triple: number; double: number; single: number }> = {
+  1: { triple: 0.01, double: 0.04, single: 0.35 },
+  2: { triple: 0.02, double: 0.06, single: 0.42 },
+  3: { triple: 0.03, double: 0.08, single: 0.5 },
+  4: { triple: 0.05, double: 0.1, single: 0.55 },
+  5: { triple: 0.07, double: 0.12, single: 0.58 },
+  6: { triple: 0.09, double: 0.14, single: 0.6 },
+  7: { triple: 0.12, double: 0.15, single: 0.6 },
+  8: { triple: 0.15, double: 0.16, single: 0.58 },
+  9: { triple: 0.18, double: 0.17, single: 0.55 },
+  10: { triple: 0.22, double: 0.18, single: 0.5 },
+};
+
+/**
+ * Pick the next target for the bot: the highest-priority number it hasn't
+ * closed yet. Once all are closed, score on numbers the opponent hasn't
+ * closed in the same priority order (20, 19, ..., 15, Bull).
+ */
+function pickCricketTarget(
+  botState: { numbers: Record<number, { marks: number; closed: boolean }> },
+  oppState: { numbers: Record<number, { marks: number; closed: boolean }> }
+): number {
+  for (const n of CRICKET_NUMBERS) {
+    if (!botState.numbers[n]?.closed) return n;
+  }
+  for (const n of CRICKET_NUMBERS) {
+    if (!oppState.numbers[n]?.closed) return n;
+  }
+  return 20; // fallback — every number closed by both, game effectively over
+}
+
+function rollCricketDart(
+  level: number,
+  target: number
+): CricketDart {
+  const dist = CRICKET_LEVEL_DIST[Math.max(1, Math.min(10, level))];
+  const r = Math.random();
+  // Bull can't be a triple
+  const allowTriple = target !== 25;
+  if (allowTriple && r < dist.triple) return { number: target, marks: 3 };
+  const doubleCutoff = (allowTriple ? dist.triple : 0) + dist.double;
+  if (r < doubleCutoff) return { number: target, marks: 2 };
+  if (r < doubleCutoff + dist.single) return { number: target, marks: 1 };
+  return { number: 0, marks: 0 };
+}
+
+/**
+ * Generate 3 Cricket darts for the bot's turn. Retargets between darts if the
+ * current target becomes closed mid-turn.
+ */
+export function generateBotCricketTurn(
+  level: number,
+  state: CricketGameState,
+  botId: string
+): CricketDart[] {
+  const oppId = state.player1Id === botId ? state.player2Id : state.player1Id;
+
+  // Local mutable snapshots so retargeting reflects mid-turn mark accumulation.
+  const botSnap = JSON.parse(JSON.stringify(state.players[botId])) as {
+    numbers: Record<number, { marks: number; closed: boolean }>;
+    points: number;
+  };
+  const oppSnap = state.players[oppId];
+
+  const darts: CricketDart[] = [];
+  for (let i = 0; i < 3; i++) {
+    const target = pickCricketTarget(botSnap, oppSnap);
+    const dart = rollCricketDart(level, target);
+    darts.push(dart);
+
+    if (dart.marks > 0) {
+      const entry = botSnap.numbers[dart.number];
+      if (entry) {
+        entry.marks += dart.marks;
+        if (entry.marks >= 3) entry.closed = true;
+      }
+    }
+  }
+
+  return darts;
 }

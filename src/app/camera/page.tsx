@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CameraPeer } from "@/lib/webrtc/peer";
+import { useWakeLock } from "@/lib/hooks/useWakeLock";
 
 type CameraState = "loading" | "ready" | "paired" | "error";
 
@@ -22,14 +23,25 @@ export default function CameraPage() {
 
 function CameraPageInner() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const outputStreamRef = useRef<MediaStream | null>(null);
   const cameraPeerRef = useRef<CameraPeer | null>(null);
+  const zoomRef = useRef(1);
+  const rafRef = useRef<number | null>(null);
   const [cameraState, setCameraState] = useState<CameraState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [zoom, setZoom] = useState(1);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingId, setPairingId] = useState<string | null>(null);
   const codeGenerated = useRef(false);
+
+  useWakeLock();
+
+  // Keep zoomRef in sync for the draw loop
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
 
   // Start camera on mount
   useEffect(() => {
@@ -44,9 +56,43 @@ function CameraPageInner() {
           audio: false,
         });
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (!video || !canvas) return;
+        video.srcObject = stream;
+        await video.play().catch(() => {});
+
+        const vw = video.videoWidth || 1280;
+        const vh = video.videoHeight || 720;
+        canvas.width = vw;
+        canvas.height = vh;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          setErrorMessage("Canvas not supported in this browser.");
+          setCameraState("error");
+          return;
         }
+
+        const draw = () => {
+          const z = zoomRef.current;
+          const sw = vw / z;
+          const sh = vh / z;
+          const sx = (vw - sw) / 2;
+          const sy = (vh - sh) / 2;
+          ctx.drawImage(video, sx, sy, sw, sh, 0, 0, vw, vh);
+          rafRef.current = requestAnimationFrame(draw);
+        };
+        draw();
+
+        const captureStream = (
+          canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }
+        ).captureStream;
+        if (!captureStream) {
+          setErrorMessage("Canvas streaming not supported in this browser.");
+          setCameraState("error");
+          return;
+        }
+        outputStreamRef.current = captureStream.call(canvas, 30);
         setCameraState("ready");
       } catch {
         setErrorMessage("Camera permission denied. Please allow camera access.");
@@ -57,7 +103,10 @@ function CameraPageInner() {
     void startCamera();
 
     return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      outputStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
@@ -109,10 +158,10 @@ function CameraPageInner() {
 
   // Start WebRTC CameraPeer once paired
   useEffect(() => {
-    if (cameraState !== "paired" || !pairingId || !streamRef.current) return;
+    if (cameraState !== "paired" || !pairingId || !outputStreamRef.current) return;
 
     const supabase = createClient();
-    const peer = new CameraPeer(supabase, pairingId, streamRef.current);
+    const peer = new CameraPeer(supabase, pairingId, outputStreamRef.current);
     cameraPeerRef.current = peer;
 
     return () => {
@@ -223,8 +272,11 @@ function CameraPageInner() {
             autoPlay
             playsInline
             muted
+            className="hidden"
+          />
+          <canvas
+            ref={canvasRef}
             className="h-full w-full object-cover"
-            style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}
           />
           {cameraState === "loading" && (
             <div className="absolute inset-0 flex items-center justify-center">
