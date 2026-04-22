@@ -10,6 +10,7 @@ export interface PipelineHandle {
   sessionId: string;
   startedAt: number;
   xvfb: ChildProcess;
+  unclutter: ChildProcess;
   chromium: ChildProcess;
   ffmpeg: ChildProcess;
   display: string;
@@ -37,6 +38,16 @@ export function startPipeline(params: {
     "Xvfb",
     [display, "-screen", "0", `${WIDTH}x${HEIGHT}x24`, "-ac", "+extension", "RANDR"],
     { stdio: ["ignore", "inherit", "inherit"] }
+  );
+
+  // Hide the X cursor so it doesn't appear in the captured stream.
+  const unclutter = spawn(
+    "unclutter",
+    ["-idle", "0", "-root"],
+    {
+      env: { ...process.env, DISPLAY: display },
+      stdio: ["ignore", "inherit", "inherit"],
+    }
   );
 
   // Give Xvfb a beat to open the socket before Chromium tries to connect.
@@ -91,6 +102,7 @@ export function startPipeline(params: {
   const stop = () => {
     try { ffmpeg.kill("SIGINT"); } catch {}
     try { chromium.kill("SIGTERM"); } catch {}
+    try { unclutter.kill("SIGTERM"); } catch {}
     try { xvfb.kill("SIGTERM"); } catch {}
   };
 
@@ -98,6 +110,7 @@ export function startPipeline(params: {
     sessionId,
     startedAt: Date.now(),
     xvfb,
+    unclutter,
     chromium,
     ffmpeg,
     display,
