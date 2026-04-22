@@ -67,14 +67,26 @@ export async function POST(request: Request) {
 
   const broadcastUrl = `${appUrl}/broadcast/${gameId}?t=${token}`;
 
-  const vpsRes = await fetch(`${controlUrl}/start`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Control-Secret": controlSecret,
-    },
-    body: JSON.stringify({ sessionId: gameId, broadcastUrl, streamKey }),
-  });
+  let vpsRes: Response;
+  try {
+    vpsRes = await fetch(`${controlUrl}/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Control-Secret": controlSecret,
+      },
+      body: JSON.stringify({ sessionId: gameId, broadcastUrl, streamKey }),
+    });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: "Could not reach VPS control plane",
+        detail: err instanceof Error ? err.message : String(err),
+        controlUrl,
+      },
+      { status: 502 }
+    );
+  }
 
   const vpsBody = (await vpsRes.json().catch(() => ({}))) as Record<string, unknown>;
   if (!vpsRes.ok) {
