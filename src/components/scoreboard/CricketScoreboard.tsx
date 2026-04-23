@@ -21,14 +21,14 @@ export function CricketScoreboard({
       : `Best of ${state.target} legs`;
 
   return (
-    <div className="rounded-xl bg-zinc-900 p-4">
-      <div className="mb-3 flex items-center justify-between">
+    <div className="rounded-xl bg-zinc-900 p-3">
+      <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
           Cricket
         </h2>
         <span className="text-xs text-zinc-500">{matchLabel}</span>
       </div>
-      <div className="mb-3 flex items-center justify-between text-xs text-zinc-500">
+      <div className="mb-2 flex items-center justify-between text-xs text-zinc-500">
         <span>
           {state.matchFormat === "sets" ? `Set ${state.currentSet} · ` : ""}
           Leg {state.currentLeg}
@@ -44,7 +44,7 @@ export function CricketScoreboard({
           return (
             <div
               key={playerId}
-              className={`rounded-lg p-4 transition-colors ${
+              className={`rounded-lg p-3 transition-colors ${
                 isActive
                   ? "bg-emerald-900/30 ring-2 ring-emerald-500"
                   : "bg-zinc-800"
@@ -75,8 +75,7 @@ export function CricketScoreboard({
                   </span>
                 </span>
               </div>
-              <div className="mt-1 text-4xl font-bold text-white">{points}</div>
-              <div className="mt-1 text-xs text-zinc-500">points</div>
+              <div className="mt-1 text-3xl font-bold text-white">{points}</div>
             </div>
           );
         })}

@@ -76,6 +76,16 @@ export default function GamePage() {
 
   useWakeLock();
 
+  // Best-effort portrait lock — only works in fullscreen / installed PWAs.
+  useEffect(() => {
+    const orientation = (screen as Screen & {
+      orientation?: { lock?: (o: string) => Promise<void> };
+    }).orientation;
+    orientation?.lock?.("portrait").catch(() => {
+      // Silently ignored: lock isn't allowed outside of fullscreen/PWA.
+    });
+  }, []);
+
   const [userId, setUserId] = useState<string | null>(null);
   const [gameRow, setGameRow] = useState<GameRow | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -634,7 +644,6 @@ export default function GamePage() {
   const lastTurn = gameState.turns.length > 0
     ? gameState.turns[gameState.turns.length - 1]
     : null;
-  const canEdit = lastTurn?.playerId === userId && !isFinished;
 
   // Should we show opponent camera feed?
   const showOpponentCamera =
@@ -652,7 +661,20 @@ export default function GamePage() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
-      <div className="mx-auto max-w-md px-4 py-4">
+      {/* Mobile landscape nudge — covers content and asks user to rotate. */}
+      <div className="fixed inset-0 z-[60] hidden items-center justify-center bg-zinc-950 text-center landscape-nudge">
+        <div className="px-6">
+          <div className="text-5xl">📱</div>
+          <p className="mt-3 text-lg font-semibold text-white">
+            Please rotate your device
+          </p>
+          <p className="mt-1 text-sm text-zinc-400">
+            DartStreamer games are designed for portrait view.
+          </p>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-md px-4 py-2">
         {/* Top bar: stream controls + broadcast link + camera status */}
         {!isFinished && (
           <div className="flex items-center justify-end gap-3">
@@ -726,7 +748,7 @@ export default function GamePage() {
         )}
 
         {/* Scoreboard */}
-        <div className="mt-4">
+        <div className="mt-2">
           {isX01State(gameState) && (
             <X01Scoreboard
               state={gameState}
@@ -745,7 +767,7 @@ export default function GamePage() {
 
         {/* Score input OR opponent camera feed */}
         {!isFinished && (
-          <div className="mt-4">
+          <div className="mt-2">
             {showOpponentCamera ? (
               <OpponentCameraFeed
                 opponentName={opponentName}
@@ -784,15 +806,8 @@ export default function GamePage() {
           </div>
         )}
 
-        {/* Edit button */}
-        {canEdit && !isFinished && (
-          <button
-            onClick={() => setEditModalOpen(true)}
-            className="mt-3 w-full rounded-lg border border-amber-700 py-2 text-sm text-amber-400 transition-colors hover:bg-amber-900/20"
-          >
-            Edit Last Turn
-          </button>
-        )}
+        {/* Edit Last Turn entrypoint is intentionally hidden for now — the
+            modal and state remain wired so a future UI can reopen it. */}
 
         <EditScore
           isOpen={editModalOpen}
