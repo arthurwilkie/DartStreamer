@@ -24,10 +24,8 @@ import { X01Scoreboard } from "@/components/scoreboard/X01Scoreboard";
 import { CricketScoreboard } from "@/components/scoreboard/CricketScoreboard";
 import { TurnIndicator } from "@/components/scoreboard/TurnIndicator";
 import { EditScore } from "@/components/scoring/EditScore";
-import { GameStatsDisplay } from "@/components/game/GameStatsDisplay";
-import { TurnHistory } from "@/components/game/TurnHistory";
+import { PostGameResults } from "@/components/game/PostGameResults";
 import { BOT_PLAYER_ID, generateBotScore, generateBotCricketTurn } from "@/lib/game/bot";
-import { calculateGameStatsForPlayer } from "@/lib/game/stats";
 import { shouldShowDartsAtDoublePopup, getDartsAtDoubleOptions, getMinDartsToFinish } from "@/lib/game/checkouts";
 import { DartsAtDoublePopup } from "@/components/scoring/DartsAtDoublePopup";
 import { CameraStatusIcon } from "@/components/game/CameraStatusIcon";
@@ -684,12 +682,6 @@ export default function GamePage() {
           const p2Id = Object.keys(playerNames).find((id) => id !== p1Id) ?? "";
           const winnerId = gameRow.winner_id;
           const startScore = isX01State(gameState) ? gameState.startingScore : 0;
-          const p1Stats = calculateGameStatsForPlayer(
-            gameState.turns, p1Id, gameState.mode, winnerId === p1Id, startScore || 501
-          );
-          const p2Stats = calculateGameStatsForPlayer(
-            gameState.turns, p2Id, gameState.mode, winnerId === p2Id, startScore || 501
-          );
 
           return (
             <div className="space-y-4">
@@ -710,26 +702,13 @@ export default function GamePage() {
                 </button>
               </div>
 
-              <GameStatsDisplay
-                player1={{
-                  name: playerNames[p1Id] ?? "Player 1",
-                  stats: p1Stats,
-                  isWinner: winnerId === p1Id,
-                }}
-                player2={{
-                  name: playerNames[p2Id] ?? "Player 2",
-                  stats: p2Stats,
-                  isWinner: winnerId === p2Id,
-                }}
-                mode={gameState.mode}
-              />
-
-              <TurnHistory
+              <PostGameResults
                 turns={gameState.turns}
                 player1Id={p1Id}
                 player2Id={p2Id}
                 player1Name={playerNames[p1Id] ?? "Player 1"}
                 player2Name={playerNames[p2Id] ?? "Player 2"}
+                winnerId={winnerId}
                 mode={gameState.mode}
                 startScore={startScore}
               />
@@ -783,16 +762,23 @@ export default function GamePage() {
                   />
                 )}
                 {isCricketState(gameState) && (() => {
-                  const opponentId =
+                  // Left side = logged-in user, right side = other player.
+                  // Keeps the input grid visually aligned with the scoreboard
+                  // header tile each user sees on their own device.
+                  const leftId = userId;
+                  const rightId =
                     gameState.player1Id === userId
                       ? gameState.player2Id
                       : gameState.player1Id;
+                  const activeSide: "left" | "right" =
+                    gameState.currentPlayerId === leftId ? "left" : "right";
                   return (
                     <CricketInput
                       onSubmit={handleCricketSubmit}
                       disabled={!isYourTurn || submitting}
-                      playerState={gameState.players[userId]}
-                      opponentState={gameState.players[opponentId]}
+                      leftPlayerState={gameState.players[leftId]}
+                      rightPlayerState={gameState.players[rightId]}
+                      activeSide={activeSide}
                     />
                   );
                 })()}

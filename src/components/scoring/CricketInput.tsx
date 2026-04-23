@@ -10,23 +10,62 @@ import {
 interface CricketInputProps {
   onSubmit: (darts: CricketDart[]) => void;
   disabled?: boolean;
-  playerState?: CricketPlayerState;
-  opponentState?: CricketPlayerState;
+  /** Marks already committed by the player on the left side of the scoreboard. */
+  leftPlayerState?: CricketPlayerState;
+  /** Marks already committed by the player on the right side of the scoreboard. */
+  rightPlayerState?: CricketPlayerState;
+  /** Which side is currently throwing — drives where pending marks render. */
+  activeSide?: "left" | "right";
 }
 
 const MISS_DART: CricketDart = { number: 0, marks: 0 };
 
-function MarkGlyph({ marks }: { marks: number }) {
-  if (marks <= 0) return <span className="text-zinc-700">&nbsp;</span>;
-  if (marks === 1)
-    return <span className="text-2xl font-semibold text-white">/</span>;
-  if (marks === 2)
-    return <span className="text-2xl font-semibold text-white">✕</span>;
-  // 3+ = closed: X inside a circle
-  return (
+/**
+ * Render the mark glyph for a given mark count. Values beyond 3 are rendered
+ * as a closed "⊗" with a numeric subscript showing the extra point-scoring
+ * marks (e.g. ⊗₁ = closed + 1 scoring mark).
+ */
+function MarkGlyph({
+  marks,
+  side = "left",
+  dim = false,
+}: {
+  marks: number;
+  side?: "left" | "right";
+  dim?: boolean;
+}) {
+  const tone = dim ? "text-zinc-600" : "text-white";
+  const closedTone = dim ? "border-zinc-600 text-zinc-500" : "border-emerald-400 text-emerald-400";
+
+  if (marks <= 0) return <span className={tone}>&nbsp;</span>;
+  if (marks === 1) return <span className={`text-2xl font-semibold ${tone}`}>/</span>;
+  if (marks === 2) return <span className={`text-2xl font-semibold ${tone}`}>✕</span>;
+
+  const extras = marks - 3;
+  const subscript =
+    extras > 0 ? (
+      <span
+        className={`text-xs font-semibold ${dim ? "text-zinc-500" : "text-emerald-300"}`}
+      >
+        {extras}
+      </span>
+    ) : null;
+
+  const glyph = (
     <span className="relative inline-flex h-7 w-7 items-center justify-center">
-      <span className="absolute inset-0 rounded-full border-2 border-emerald-400" />
-      <span className="relative text-lg font-bold text-emerald-400">✕</span>
+      <span className={`absolute inset-0 rounded-full border-2 ${closedTone}`} />
+      <span className={`relative text-lg font-bold ${dim ? "text-zinc-500" : "text-emerald-400"}`}>
+        ✕
+      </span>
+    </span>
+  );
+
+  if (!subscript) return glyph;
+  return (
+    <span className="inline-flex items-end gap-0.5">
+      {side === "right" ? subscript : null}
+      {glyph}
+      {side === "left" ? subscript : null}
     </span>
   );
 }
@@ -53,24 +92,23 @@ function DartPill({ dart }: { dart: CricketDart | undefined }) {
   );
 }
 
-function Dots({ count }: { count: number }) {
-  return (
-    <div className="mt-0.5 flex items-center justify-center gap-0.5">
-      {Array.from({ length: count }).map((_, i) => (
-        <span
-          key={i}
-          className="inline-block h-1 w-1 rounded-full bg-zinc-400"
-        />
-      ))}
-    </div>
-  );
+function cellLabel(num: number, mult: 1 | 2 | 3): string | null {
+  if (num === 25) {
+    if (mult === 1) return "SB";
+    if (mult === 2) return "DB";
+    return null;
+  }
+  if (mult === 1) return `S${num}`;
+  if (mult === 2) return `D${num}`;
+  return `T${num}`;
 }
 
 export function CricketInput({
   onSubmit,
   disabled,
-  playerState,
-  opponentState,
+  leftPlayerState,
+  rightPlayerState,
+  activeSide = "left",
 }: CricketInputProps) {
   const [darts, setDarts] = useState<CricketDart[]>([]);
   const dartsThrown = darts.length;
@@ -85,11 +123,27 @@ export function CricketInput({
   }
 
   function handleSubmit() {
-    // Pad with misses so the server always records a complete 3-dart turn.
     const padded: CricketDart[] = [...darts];
     while (padded.length < 3) padded.push({ ...MISS_DART });
     onSubmit(padded);
     setDarts([]);
+  }
+
+  // Accumulate pending marks by number so the active side's grid shows live
+  // feedback before the turn is committed.
+  const pendingByNumber = darts.reduce<Record<number, number>>((acc, d) => {
+    if (d.marks <= 0 || d.number === 0) return acc;
+    acc[d.number] = (acc[d.number] ?? 0) + d.marks;
+    return acc;
+  }, {});
+
+  function marksForSide(side: "left" | "right", num: number): number {
+    const base =
+      side === "left"
+        ? leftPlayerState?.numbers[num]?.marks ?? 0
+        : rightPlayerState?.numbers[num]?.marks ?? 0;
+    if (side === activeSide) return base + (pendingByNumber[num] ?? 0);
+    return base;
   }
 
   return (
@@ -130,27 +184,29 @@ export function CricketInput({
         </button>
       </div>
 
-      {/* Grid: [P1 marks | S | D | T | P2 marks] per number. Bull row has only S and D. */}
+      {/* Grid: [left marks | S | D | T | right marks] per number. */}
       <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
         {CRICKET_NUMBERS.map((num) => {
-          const isBull = num === 25;
-          const playerMarks = playerState?.numbers[num]?.marks ?? 0;
-          const opponentMarks = opponentState?.numbers[num]?.marks ?? 0;
-          const label = isBull ? "Bull" : String(num);
-          const multipliers = isBull ? [1, 2] : [1, 2, 3];
+          const leftMarks = marksForSide("left", num);
+          const rightMarks = marksForSide("right", num);
+          const leftCommitted = leftPlayerState?.numbers[num]?.marks ?? 0;
+          const rightCommitted = rightPlayerState?.numbers[num]?.marks ?? 0;
+          const bothClosed = leftCommitted >= 3 && rightCommitted >= 3;
 
           return (
             <div
               key={num}
-              className="grid grid-cols-5 items-stretch border-b border-zinc-800/80 last:border-b-0"
+              className={`grid grid-cols-5 items-stretch border-b border-zinc-800/80 last:border-b-0 ${
+                bothClosed ? "bg-zinc-900/60 line-through" : ""
+              }`}
             >
               <div className="flex items-center justify-center border-r border-zinc-800/80 py-3">
-                <MarkGlyph marks={playerMarks} />
+                <MarkGlyph marks={leftMarks} side="left" dim={bothClosed} />
               </div>
 
-              {[1, 2, 3].map((mult) => {
-                const available = multipliers.includes(mult);
-                if (!available) {
+              {([1, 2, 3] as const).map((mult) => {
+                const label = cellLabel(num, mult);
+                if (!label) {
                   return (
                     <div
                       key={mult}
@@ -162,19 +218,26 @@ export function CricketInput({
                   <button
                     key={mult}
                     onClick={() => addDart(num, mult)}
-                    disabled={disabled || dartsThrown >= 3}
-                    className="flex flex-col items-center justify-center border-r border-zinc-800/80 py-3 text-center transition-colors hover:bg-zinc-900 active:bg-zinc-800 disabled:opacity-40"
+                    disabled={disabled || dartsThrown >= 3 || bothClosed}
+                    className={`flex flex-col items-center justify-center border-r border-zinc-800/80 py-3 text-center transition-colors disabled:opacity-40 ${
+                      bothClosed
+                        ? "cursor-not-allowed"
+                        : "hover:bg-zinc-900 active:bg-zinc-800"
+                    }`}
                   >
-                    <span className="text-lg font-semibold text-white">
+                    <span
+                      className={`text-lg font-semibold ${
+                        bothClosed ? "text-zinc-600" : "text-white"
+                      }`}
+                    >
                       {label}
                     </span>
-                    <Dots count={mult} />
                   </button>
                 );
               })}
 
               <div className="flex items-center justify-center py-3">
-                <MarkGlyph marks={opponentMarks} />
+                <MarkGlyph marks={rightMarks} side="right" dim={bothClosed} />
               </div>
             </div>
           );
