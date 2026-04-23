@@ -24,18 +24,18 @@ import { X01Scoreboard } from "@/components/scoreboard/X01Scoreboard";
 import { CricketScoreboard } from "@/components/scoreboard/CricketScoreboard";
 import { TurnIndicator } from "@/components/scoreboard/TurnIndicator";
 import { EditScore } from "@/components/scoring/EditScore";
-import { GameStatsDisplay } from "@/components/game/GameStatsDisplay";
-import { TurnHistory } from "@/components/game/TurnHistory";
-import { BOT_PLAYER_ID, generateBotScore } from "@/lib/game/bot";
-import { calculateGameStatsForPlayer } from "@/lib/game/stats";
+import { PostGameResults } from "@/components/game/PostGameResults";
+import { BOT_PLAYER_ID, generateBotScore, generateBotCricketTurn } from "@/lib/game/bot";
 import { shouldShowDartsAtDoublePopup, getDartsAtDoubleOptions, getMinDartsToFinish } from "@/lib/game/checkouts";
 import { DartsAtDoublePopup } from "@/components/scoring/DartsAtDoublePopup";
 import { CameraStatusIcon } from "@/components/game/CameraStatusIcon";
 import { StreamControlButton } from "@/components/game/StreamControlButton";
 import { DeviceCameraPopup } from "@/components/game/DeviceCameraPopup";
+import { ExternalCameraPopup } from "@/components/game/ExternalCameraPopup";
 import { OpponentCameraFeed } from "@/components/game/OpponentCameraFeed";
 import { useSession } from "@/lib/session/SessionContext";
 import { ViewerPeer } from "@/lib/webrtc/peer";
+import { useWakeLock } from "@/lib/hooks/useWakeLock";
 
 interface GameRow {
   id: string;
@@ -74,6 +74,18 @@ export default function GamePage() {
   const router = useRouter();
   const gameId = params.id as string;
 
+  useWakeLock();
+
+  // Best-effort portrait lock — only works in fullscreen / installed PWAs.
+  useEffect(() => {
+    const orientation = (screen as Screen & {
+      orientation?: { lock?: (o: string) => Promise<void> };
+    }).orientation;
+    orientation?.lock?.("portrait").catch(() => {
+      // Silently ignored: lock isn't allowed outside of fullscreen/PWA.
+    });
+  }, []);
+
   const [userId, setUserId] = useState<string | null>(null);
   const [gameRow, setGameRow] = useState<GameRow | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -86,6 +98,7 @@ export default function GamePage() {
   const [dartsAtDoubleOptions, setDartsAtDoubleOptions] = useState<number[]>([]);
   const [showDartsAtDoublePopup, setShowDartsAtDoublePopup] = useState(false);
   const [deviceCameraOpen, setDeviceCameraOpen] = useState(false);
+  const [externalCameraOpen, setExternalCameraOpen] = useState(false);
   const [opponentPairingId, setOpponentPairingId] = useState<string | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [rtcState, setRtcState] = useState<RTCPeerConnectionState | "idle">("idle");
@@ -502,6 +515,46 @@ export default function GamePage() {
     [pendingScore, commitX01Turn]
   );
 
+  const playBotCricketTurn = useCallback(
+    async (currentState: GameState): Promise<GameState> => {
+      if (!gameRow || !isCricketState(currentState)) return currentState;
+
+      const botLevel = gameRow.bot_level!;
+      const botDarts = generateBotCricketTurn(botLevel, currentState, BOT_PLAYER_ID);
+
+      const { newState, result } = applyTurn(currentState, BOT_PLAYER_ID, botDarts);
+      const cricketResult = result as import("@/lib/game/rules/cricket").CricketTurnResult;
+      const totalMarks = botDarts.reduce((sum, d) => sum + d.marks, 0);
+      const nextCricket = newState as import("@/lib/game/types").CricketGameState;
+
+      await fetch(`/api/games/${gameId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerId: BOT_PLAYER_ID,
+          scoreEntered: totalMarks + cricketResult.pointsScored,
+          dartsDetail: botDarts,
+          roundNumber: currentState.currentRound,
+          legNumber: (currentState as import("@/lib/game/types").CricketGameState).currentLeg,
+          setNumber: (currentState as import("@/lib/game/types").CricketGameState).currentSet,
+          legEnded: cricketResult.legEnded,
+          legWinnerId: cricketResult.legWinnerId,
+          setEnded: cricketResult.setEnded,
+          setWinnerId: cricketResult.setWinnerId,
+          matchOver: cricketResult.matchOver,
+          matchWinnerId: cricketResult.matchWinnerId,
+          nextPlayerId: nextCricket.currentPlayerId,
+          nextRound: nextCricket.currentRound,
+          nextLeg: nextCricket.currentLeg,
+          nextSet: nextCricket.currentSet,
+        }),
+      });
+
+      return newState;
+    },
+    [gameRow, gameId]
+  );
+
   const handleCricketSubmit = useCallback(
     async (darts: CricketDart[]) => {
       if (!gameState || !userId || !gameRow || submitting) return;
@@ -512,25 +565,61 @@ export default function GamePage() {
       const { newState, result } = applyTurn(gameState, userId, darts);
       setGameState(newState);
 
+      const cricketResult = result as import("@/lib/game/rules/cricket").CricketTurnResult;
       const totalMarks = darts.reduce((sum, d) => sum + d.marks, 0);
+      const nextCricket = newState as import("@/lib/game/types").CricketGameState;
+      const prevCricket = gameState as import("@/lib/game/types").CricketGameState;
 
       await fetch(`/api/games/${gameId}/turns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          scoreEntered: totalMarks + ("pointsScored" in result ? result.pointsScored : 0),
+          scoreEntered: totalMarks + cricketResult.pointsScored,
           dartsDetail: darts,
           roundNumber: gameState.currentRound,
+          legNumber: prevCricket.currentLeg,
+          setNumber: prevCricket.currentSet,
+          legEnded: cricketResult.legEnded,
+          legWinnerId: cricketResult.legWinnerId,
+          setEnded: cricketResult.setEnded,
+          setWinnerId: cricketResult.setWinnerId,
+          matchOver: cricketResult.matchOver,
+          matchWinnerId: cricketResult.matchWinnerId,
+          nextPlayerId: nextCricket.currentPlayerId,
+          nextRound: nextCricket.currentRound,
+          nextLeg: nextCricket.currentLeg,
+          nextSet: nextCricket.currentSet,
         }),
       });
 
-      if ("gameOver" in result && result.gameOver && "winnerId" in result && result.winnerId) {
-        await finishGame(result.winnerId as string);
+      let gameOverResult = isGameOver(newState);
+      if (gameOverResult.over && gameOverResult.winnerId) {
+        setGameRow((prev) =>
+          prev ? { ...prev, status: "finished", winner_id: gameOverResult.winnerId! } : null
+        );
+        setSubmitting(false);
+        return;
+      }
+
+      // Bot auto-play for Cricket
+      if (isBotGame && !botPlayingRef.current) {
+        botPlayingRef.current = true;
+        await new Promise((r) => setTimeout(r, 600));
+        const stateAfterBot = await playBotCricketTurn(newState);
+        setGameState(stateAfterBot);
+
+        gameOverResult = isGameOver(stateAfterBot);
+        if (gameOverResult.over && gameOverResult.winnerId) {
+          setGameRow((prev) =>
+            prev ? { ...prev, status: "finished", winner_id: gameOverResult.winnerId! } : null
+          );
+        }
+        botPlayingRef.current = false;
       }
 
       setSubmitting(false);
     },
-    [gameState, userId, gameRow, gameId, submitting, finishGame]
+    [gameState, userId, gameRow, gameId, submitting, isBotGame, playBotCricketTurn]
   );
 
   const handleEditConfirm = useCallback(() => {
@@ -555,7 +644,6 @@ export default function GamePage() {
   const lastTurn = gameState.turns.length > 0
     ? gameState.turns[gameState.turns.length - 1]
     : null;
-  const canEdit = lastTurn?.playerId === userId && !isFinished;
 
   // Should we show opponent camera feed?
   const showOpponentCamera =
@@ -573,7 +661,20 @@ export default function GamePage() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
-      <div className="mx-auto max-w-md px-4 py-4">
+      {/* Mobile landscape nudge — covers content and asks user to rotate. */}
+      <div className="fixed inset-0 z-[60] hidden items-center justify-center bg-zinc-950 text-center landscape-nudge">
+        <div className="px-6">
+          <div className="text-5xl">📱</div>
+          <p className="mt-3 text-lg font-semibold text-white">
+            Please rotate your device
+          </p>
+          <p className="mt-1 text-sm text-zinc-400">
+            DartStreamer games are designed for portrait view.
+          </p>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-md px-4 py-2">
         {/* Top bar: stream controls + broadcast link + camera status */}
         {!isFinished && (
           <div className="flex items-center justify-end gap-3">
@@ -587,7 +688,10 @@ export default function GamePage() {
               BROADCAST
             </a>
             {!isBotGame && (
-              <CameraStatusIcon onOpenDeviceCamera={() => setDeviceCameraOpen(true)} />
+              <CameraStatusIcon
+                onOpenDeviceCamera={() => setDeviceCameraOpen(true)}
+                onOpenExternalCamera={() => setExternalCameraOpen(true)}
+              />
             )}
           </div>
         )}
@@ -600,12 +704,6 @@ export default function GamePage() {
           const p2Id = Object.keys(playerNames).find((id) => id !== p1Id) ?? "";
           const winnerId = gameRow.winner_id;
           const startScore = isX01State(gameState) ? gameState.startingScore : 0;
-          const p1Stats = calculateGameStatsForPlayer(
-            gameState.turns, p1Id, gameState.mode, winnerId === p1Id, startScore || 501
-          );
-          const p2Stats = calculateGameStatsForPlayer(
-            gameState.turns, p2Id, gameState.mode, winnerId === p2Id, startScore || 501
-          );
 
           return (
             <div className="space-y-4">
@@ -626,26 +724,13 @@ export default function GamePage() {
                 </button>
               </div>
 
-              <GameStatsDisplay
-                player1={{
-                  name: playerNames[p1Id] ?? "Player 1",
-                  stats: p1Stats,
-                  isWinner: winnerId === p1Id,
-                }}
-                player2={{
-                  name: playerNames[p2Id] ?? "Player 2",
-                  stats: p2Stats,
-                  isWinner: winnerId === p2Id,
-                }}
-                mode={gameState.mode}
-              />
-
-              <TurnHistory
+              <PostGameResults
                 turns={gameState.turns}
                 player1Id={p1Id}
                 player2Id={p2Id}
                 player1Name={playerNames[p1Id] ?? "Player 1"}
                 player2Name={playerNames[p2Id] ?? "Player 2"}
+                winnerId={winnerId}
                 mode={gameState.mode}
                 startScore={startScore}
               />
@@ -698,26 +783,31 @@ export default function GamePage() {
                     disabled={!isYourTurn || submitting}
                   />
                 )}
-                {isCricketState(gameState) && (
-                  <CricketInput
-                    onSubmit={handleCricketSubmit}
-                    disabled={!isYourTurn || submitting}
-                  />
-                )}
+                {isCricketState(gameState) && (() => {
+                  // Mirror the scoreboard: player1 is always on the left,
+                  // player2 always on the right, regardless of whose device
+                  // we're rendering on.
+                  const leftId = gameState.player1Id;
+                  const rightId = gameState.player2Id;
+                  const activeSide: "left" | "right" =
+                    gameState.currentPlayerId === leftId ? "left" : "right";
+                  return (
+                    <CricketInput
+                      onSubmit={handleCricketSubmit}
+                      disabled={!isYourTurn || submitting}
+                      leftPlayerState={gameState.players[leftId]}
+                      rightPlayerState={gameState.players[rightId]}
+                      activeSide={activeSide}
+                    />
+                  );
+                })()}
               </>
             )}
           </div>
         )}
 
-        {/* Edit button */}
-        {canEdit && !isFinished && (
-          <button
-            onClick={() => setEditModalOpen(true)}
-            className="mt-3 w-full rounded-lg border border-amber-700 py-2 text-sm text-amber-400 transition-colors hover:bg-amber-900/20"
-          >
-            Edit Last Turn
-          </button>
-        )}
+        {/* Edit Last Turn entrypoint is intentionally hidden for now — the
+            modal and state remain wired so a future UI can reopen it. */}
 
         <EditScore
           isOpen={editModalOpen}
@@ -739,6 +829,11 @@ export default function GamePage() {
         <DeviceCameraPopup
           isOpen={deviceCameraOpen}
           onClose={() => setDeviceCameraOpen(false)}
+        />
+
+        <ExternalCameraPopup
+          isOpen={externalCameraOpen}
+          onClose={() => setExternalCameraOpen(false)}
         />
       </div>
     </div>

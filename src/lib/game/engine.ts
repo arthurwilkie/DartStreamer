@@ -62,20 +62,8 @@ export function isGameOver(state: GameState): { over: boolean; winnerId?: string
   }
 
   if (isCricketState(state)) {
-    // Check in the last turn result — the applyCricketTurn already checks
-    // We can also re-check here
-    for (const [playerId, playerState] of Object.entries(state.players)) {
-      const allClosed = [15, 16, 17, 18, 19, 20, 25].every(
-        (n) => playerState.numbers[n]?.closed
-      );
-      if (allClosed) {
-        const otherPlayerId = Object.keys(state.players).find(
-          (id) => id !== playerId
-        )!;
-        if (playerState.points >= state.players[otherPlayerId].points) {
-          return { over: true, winnerId: playerId };
-        }
-      }
+    if (state.matchWinnerId) {
+      return { over: true, winnerId: state.matchWinnerId };
     }
     return { over: false };
   }

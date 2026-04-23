@@ -82,5 +82,5 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
-  return NextResponse.json({ paired: true });
+  return NextResponse.json({ paired: true, pairingId: pairing.id });
 }

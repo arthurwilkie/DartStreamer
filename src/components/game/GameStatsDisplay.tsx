@@ -98,33 +98,59 @@ export function GameStatsDisplay({
       {isCricket ? (
         <>
           <StatRow
-            label="Marks"
-            value1={String(s1.totalScore)}
-            value2={String(s2.totalScore)}
-            highlight={highlightBetter(s1.totalScore, s2.totalScore, true)}
+            label="Darts Thrown"
+            value1={String(s1.totalDarts)}
+            value2={String(s2.totalDarts)}
+            highlight={highlightBetter(s1.totalDarts, s2.totalDarts, false)}
           />
           <StatRow
             label="Marks/Round"
-            value1={
-              s1.totalDarts > 0
-                ? (s1.totalScore / (s1.totalDarts / 3)).toFixed(2)
-                : "0"
-            }
-            value2={
-              s2.totalDarts > 0
-                ? (s2.totalScore / (s2.totalDarts / 3)).toFixed(2)
-                : "0"
-            }
+            value1={s1.cricketMarksPerRound.toFixed(2)}
+            value2={s2.cricketMarksPerRound.toFixed(2)}
             highlight={highlightBetter(
-              s1.totalDarts > 0 ? s1.totalScore / (s1.totalDarts / 3) : 0,
-              s2.totalDarts > 0 ? s2.totalScore / (s2.totalDarts / 3) : 0,
+              s1.cricketMarksPerRound,
+              s2.cricketMarksPerRound,
               true
             )}
           />
           <StatRow
-            label="Rounds"
-            value1={String(s1.totalDarts / 3)}
-            value2={String(s2.totalDarts / 3)}
+            label="High Mark Round"
+            value1={String(s1.cricketHighMarkRound)}
+            value2={String(s2.cricketHighMarkRound)}
+            highlight={highlightBetter(
+              s1.cricketHighMarkRound,
+              s2.cricketHighMarkRound,
+              true
+            )}
+          />
+          <StatRow
+            label="Triples"
+            value1={String(s1.cricketTriples)}
+            value2={String(s2.cricketTriples)}
+            highlight={highlightBetter(s1.cricketTriples, s2.cricketTriples, true)}
+          />
+          <StatRow
+            label="Doubles"
+            value1={String(s1.cricketDoubles)}
+            value2={String(s2.cricketDoubles)}
+            highlight={highlightBetter(s1.cricketDoubles, s2.cricketDoubles, true)}
+          />
+          <StatRow
+            label="Singles"
+            value1={String(s1.cricketSingles)}
+            value2={String(s2.cricketSingles)}
+          />
+          <StatRow
+            label="Bulls"
+            value1={String(s1.cricketBulls)}
+            value2={String(s2.cricketBulls)}
+            highlight={highlightBetter(s1.cricketBulls, s2.cricketBulls, true)}
+          />
+          <StatRow
+            label="Misses"
+            value1={String(s1.cricketMisses)}
+            value2={String(s2.cricketMisses)}
+            highlight={highlightBetter(s1.cricketMisses, s2.cricketMisses, false)}
           />
         </>
       ) : (

@@ -1,15 +1,14 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session/SessionContext";
 
 interface Props {
   onOpenDeviceCamera: () => void;
+  onOpenExternalCamera: () => void;
 }
 
-export function CameraStatusIcon({ onOpenDeviceCamera }: Props) {
-  const router = useRouter();
+export function CameraStatusIcon({ onOpenDeviceCamera, onOpenExternalCamera }: Props) {
   const { cameraStatus } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -87,7 +86,7 @@ export function CameraStatusIcon({ onOpenDeviceCamera }: Props) {
           <button
             onClick={() => {
               setMenuOpen(false);
-              router.push("/stream");
+              onOpenExternalCamera();
             }}
             className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition-colors hover:bg-zinc-700"
           >

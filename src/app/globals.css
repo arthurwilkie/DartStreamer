@@ -24,3 +24,11 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Mobile landscape nudge on /game/[id] — show only on short-height
+   landscape viewports typical of phones / small tablets. */
+@media (orientation: landscape) and (max-height: 600px) {
+  .landscape-nudge {
+    display: flex !important;
+  }
+}

@@ -9,8 +9,11 @@ import {
   type GameState,
   type Dart,
   type CricketDart,
+  type CricketGameState,
   type GameMode,
   isX01State,
+  isCricketState,
+  CRICKET_NUMBERS,
 } from "@/lib/game/types";
 import { createGameState, applyTurn, applyScoreTurn } from "@/lib/game/engine";
 import { calculateGameStatsForPlayer } from "@/lib/game/stats";
@@ -155,7 +158,27 @@ export default function BroadcastPage() {
     };
   }, [gameRow?.id, supabase, gameId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!gameRow || !gameState || !isX01State(gameState)) {
+  if (!gameRow || !gameState) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-black text-zinc-500">
+        Loading broadcast…
+      </div>
+    );
+  }
+
+  if (isCricketState(gameState)) {
+    return (
+      <CricketBroadcast
+        state={gameState}
+        gameRow={gameRow}
+        names={names}
+        nicknames={nicknames}
+        supabase={supabase}
+      />
+    );
+  }
+
+  if (!isX01State(gameState)) {
     return (
       <div className="flex h-screen items-center justify-center bg-black text-zinc-500">
         Loading broadcast…
@@ -625,6 +648,359 @@ function CameraFeed({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Full Cricket broadcast layout. Mirrors the X01 version but swaps the
+ * per-player score pane and the right-side stats panel for Cricket-native
+ * content (marks per round, last turn label, live board grid).
+ */
+function CricketBroadcast({
+  state,
+  gameRow,
+  names,
+  nicknames,
+  supabase,
+}: {
+  state: CricketGameState;
+  gameRow: GameRow;
+  names: Record<string, string>;
+  nicknames: Record<string, string | null>;
+  supabase: SupabaseClient;
+}) {
+  const p1Id = gameRow.player1_id;
+  const p2Id = gameRow.player2_id;
+  const isFinished = gameRow.status === "finished";
+  const winnerId = gameRow.winner_id;
+  const activeId = isFinished ? null : state.currentPlayerId;
+
+  const matchLabel =
+    gameRow.match_format === "sets"
+      ? `CRICKET · BEST OF ${String(gameRow.target).toUpperCase()} SETS`
+      : `CRICKET · BEST OF ${numberWord(gameRow.target).toUpperCase()} LEGS`;
+
+  const p1Legs = state.legsWon[p1Id] ?? 0;
+  const p2Legs = state.legsWon[p2Id] ?? 0;
+  const p1Sets = state.setsWon[p1Id] ?? 0;
+  const p2Sets = state.setsWon[p2Id] ?? 0;
+
+  const legSetLabel =
+    gameRow.match_format === "sets"
+      ? `Set ${state.currentSet} · Leg ${state.currentLeg}`
+      : `Leg ${state.currentLeg}`;
+
+  const headerLabel = (() => {
+    if (!isFinished || !winnerId) return legSetLabel;
+    const winCounts =
+      gameRow.match_format === "sets" ? [p1Sets, p2Sets] : [p1Legs, p2Legs];
+    const winnerCount = winnerId === p1Id ? winCounts[0] : winCounts[1];
+    const loserCount = winnerId === p1Id ? winCounts[1] : winCounts[0];
+    return `${names[winnerId] ?? "Winner"} wins ${winnerCount}-${loserCount}`;
+  })();
+
+  function cricketLive(pid: string) {
+    const turns = state.turns.filter((t) => t.playerId === pid);
+    let darts = 0;
+    let marks = 0;
+    for (const t of turns) {
+      const details = (t.dartsDetail as CricketDart[] | undefined) ?? [];
+      darts += details.length || 3;
+      for (const d of details) marks += d.marks;
+    }
+    const rounds = turns.length;
+    const marksPerRound = rounds > 0 ? marks / rounds : 0;
+    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+    const last = lastTurn
+      ? formatCricketDarts(lastTurn.dartsDetail as CricketDart[])
+      : null;
+    return { marksPerRound, last, darts };
+  }
+
+  const p1Live = cricketLive(p1Id);
+  const p2Live = cricketLive(p2Id);
+
+  return (
+    <div className="flex h-screen w-screen items-center justify-center overflow-hidden bg-black">
+      <div
+        className="relative origin-center bg-black"
+        style={{ width: 1920, height: 1080, transform: "scale(var(--scale, 1))" }}
+      >
+        <BroadcastScaler />
+
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/dartstreamer-logo.png"
+          alt="DartStreamer"
+          className="absolute"
+          style={{ left: 30, top: 40, width: 1120, height: "auto" }}
+        />
+
+        <div
+          className="absolute bg-zinc-800"
+          style={{ left: 1220, top: 0, width: 6, height: 1080 }}
+        />
+
+        <PlayerCard
+          x={15}
+          displayName={names[p1Id] ?? "Player 1"}
+          nickname={nicknames[p1Id]}
+          cameraX={30}
+          playerId={p1Id}
+          supabase={supabase}
+        />
+        <PlayerCard
+          x={615}
+          displayName={names[p2Id] ?? "Player 2"}
+          nickname={nicknames[p2Id]}
+          cameraX={630}
+          playerId={p2Id}
+          supabase={supabase}
+        />
+
+        <div
+          className="absolute flex items-center justify-between text-zinc-400"
+          style={{ left: 1250, top: 60, width: 650, height: 40 }}
+        >
+          <div className="text-[22px] font-bold tracking-widest text-white">
+            {matchLabel}
+          </div>
+          <div
+            className={`text-[18px] tracking-wide ${
+              isFinished ? "font-bold text-emerald-400" : ""
+            }`}
+          >
+            {headerLabel}
+          </div>
+        </div>
+
+        <CricketScoreCard
+          x={1250}
+          name={names[p1Id] ?? "Player 1"}
+          points={state.players[p1Id]?.points ?? 0}
+          marksPerRound={p1Live.marksPerRound}
+          last={p1Live.last}
+          darts={p1Live.darts}
+          active={activeId === p1Id}
+          legs={p1Legs}
+          sets={p1Sets}
+          showSets={gameRow.match_format === "sets"}
+          isWinner={winnerId === p1Id}
+        />
+        <CricketScoreCard
+          x={1585}
+          name={names[p2Id] ?? "Player 2"}
+          points={state.players[p2Id]?.points ?? 0}
+          marksPerRound={p2Live.marksPerRound}
+          last={p2Live.last}
+          darts={p2Live.darts}
+          active={activeId === p2Id}
+          legs={p2Legs}
+          sets={p2Sets}
+          showSets={gameRow.match_format === "sets"}
+          isWinner={winnerId === p2Id}
+        />
+
+        <CricketBoardPanel state={state} />
+      </div>
+    </div>
+  );
+}
+
+function formatCricketDarts(darts: CricketDart[] | undefined): string {
+  if (!darts || darts.length === 0) return "—";
+  const parts = darts.map((d) => {
+    if (d.marks <= 0 || d.number === 0) return "Miss";
+    const prefix = d.marks === 1 ? "S" : d.marks === 2 ? "D" : "T";
+    if (d.number === 25) return `${prefix}B`;
+    return `${prefix}${d.number}`;
+  });
+  return parts.join(", ");
+}
+
+function CricketScoreCard({
+  x,
+  name,
+  points,
+  marksPerRound,
+  last,
+  darts,
+  active,
+  legs,
+  sets,
+  showSets,
+  isWinner,
+}: {
+  x: number;
+  name: string;
+  points: number;
+  marksPerRound: number;
+  last: string | null;
+  darts: number;
+  active: boolean;
+  legs: number;
+  sets: number;
+  showSets: boolean;
+  isWinner: boolean;
+}) {
+  return (
+    <div
+      className={`absolute rounded-2xl bg-zinc-900 p-5 ${
+        isWinner
+          ? "ring-2 ring-emerald-400"
+          : active
+          ? "ring-2 ring-emerald-400"
+          : ""
+      }`}
+      style={{ left: x, top: 110, width: 315, height: 290 }}
+    >
+      <div className="flex items-start justify-between">
+        <div
+          className={`text-[22px] font-semibold ${
+            isWinner ? "text-emerald-400" : "text-white"
+          }`}
+        >
+          {name}
+          {isWinner && " ✓"}
+        </div>
+        {active && !isWinner && (
+          <div className="mt-2 h-3 w-3 rounded-full bg-emerald-400" />
+        )}
+      </div>
+      <div className="mt-1 flex items-center gap-4 text-[15px] tracking-wider text-zinc-400">
+        {showSets && (
+          <span>
+            SETS <span className="font-bold text-white">{sets}</span>
+          </span>
+        )}
+        <span>
+          LEGS <span className="font-bold text-white">{legs}</span>
+        </span>
+      </div>
+      <div
+        className="mt-1 font-black text-white"
+        style={{ fontSize: 68, lineHeight: 1 }}
+      >
+        {points}
+      </div>
+      <div className="mt-3 space-y-1 text-[16px] text-zinc-400">
+        <StatLine label="Marks per round" value={marksPerRound.toFixed(2)} />
+        <StatLine label="Last score" value={last ?? "—"} />
+        <StatLine label="Darts thrown" value={String(darts)} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Broadcast-sized view-only Cricket board. Shows each number row with
+ * Player 1 marks on the left, the number label in the middle, and Player 2
+ * marks on the right. Rows closed by both players are dimmed.
+ */
+function CricketBoardPanel({ state }: { state: CricketGameState }) {
+  const p1Id = state.player1Id;
+  const p2Id = state.player2Id;
+  return (
+    <div
+      className="absolute overflow-hidden rounded-2xl bg-zinc-900"
+      style={{ left: 1250, top: 420, width: 650, height: 640 }}
+    >
+      <div className="flex h-full flex-col">
+        {CRICKET_NUMBERS.map((num, idx) => {
+          const p1Marks = state.players[p1Id]?.numbers[num]?.marks ?? 0;
+          const p2Marks = state.players[p2Id]?.numbers[num]?.marks ?? 0;
+          const bothClosed = p1Marks >= 3 && p2Marks >= 3;
+          const label = num === 25 ? "BULL" : String(num);
+
+          return (
+            <div
+              key={num}
+              className={`grid flex-1 grid-cols-3 items-center ${
+                idx < CRICKET_NUMBERS.length - 1 ? "border-b border-zinc-800" : ""
+              } ${bothClosed ? "bg-zinc-900/60" : ""}`}
+            >
+              <div className="flex items-center justify-center">
+                <BroadcastMark marks={p1Marks} side="left" dim={bothClosed} />
+              </div>
+              <div
+                className={`text-center font-black ${
+                  bothClosed ? "text-zinc-600" : "text-white"
+                }`}
+                style={{ fontSize: 52, lineHeight: 1 }}
+              >
+                {label}
+              </div>
+              <div className="flex items-center justify-center">
+                <BroadcastMark marks={p2Marks} side="right" dim={bothClosed} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BroadcastMark({
+  marks,
+  side,
+  dim,
+}: {
+  marks: number;
+  side: "left" | "right";
+  dim: boolean;
+}) {
+  const tone = dim ? "text-zinc-600" : "text-white";
+  const closedTone = dim ? "border-zinc-600 text-zinc-500" : "border-emerald-400 text-emerald-400";
+
+  if (marks <= 0)
+    return <span className={tone} style={{ fontSize: 48 }}>&nbsp;</span>;
+  if (marks === 1)
+    return (
+      <span className={`font-semibold ${tone}`} style={{ fontSize: 64 }}>
+        /
+      </span>
+    );
+  if (marks === 2)
+    return (
+      <span className={`font-semibold ${tone}`} style={{ fontSize: 64 }}>
+        ✕
+      </span>
+    );
+
+  const extras = marks - 3;
+  const subscript =
+    extras > 0 ? (
+      <span
+        className={`font-semibold ${dim ? "text-zinc-500" : "text-emerald-300"}`}
+        style={{ fontSize: 24 }}
+      >
+        {extras}
+      </span>
+    ) : null;
+
+  const glyph = (
+    <span
+      className="relative inline-flex items-center justify-center"
+      style={{ width: 60, height: 60 }}
+    >
+      <span className={`absolute inset-0 rounded-full border-4 ${closedTone}`} />
+      <span
+        className={`relative font-bold ${dim ? "text-zinc-500" : "text-emerald-400"}`}
+        style={{ fontSize: 36 }}
+      >
+        ✕
+      </span>
+    </span>
+  );
+
+  if (!subscript) return glyph;
+  return (
+    <span className="inline-flex items-end gap-1">
+      {side === "right" ? subscript : null}
+      {glyph}
+      {side === "left" ? subscript : null}
+    </span>
   );
 }
 

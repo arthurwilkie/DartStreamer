@@ -66,10 +66,20 @@ export interface CricketPlayerState {
 
 export interface CricketGameState {
   mode: "cricket";
+  player1Id: string;
+  player2Id: string;
+  matchFormat: MatchFormat;
+  target: number;
   players: Record<string, CricketPlayerState>;
+  legsWon: Record<string, number>;
+  setsWon: Record<string, number>;
+  currentLeg: number;
+  currentSet: number;
+  legStarterId: string;
   currentPlayerId: string;
   currentRound: number;
   turns: Turn[];
+  matchWinnerId: string | null;
 }
 
 export type GameState = X01GameState | CricketGameState;
@@ -123,4 +133,4 @@ export function targetToWin(target: number): number {
   return Math.ceil(target / 2);
 }
 
-export const CRICKET_NUMBERS = [15, 16, 17, 18, 19, 20, 25] as const;
+export const CRICKET_NUMBERS = [20, 19, 18, 17, 16, 15, 25] as const;

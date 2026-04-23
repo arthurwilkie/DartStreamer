@@ -27,6 +27,14 @@ export interface GameStats {
   dartsAtDouble: number; // total darts thrown at a double across all legs
   checkoutPct: number; // checkoutsHit / dartsAtDouble
   dartsToFinish: number; // total darts thrown across the match
+  // Cricket-specific stats (zero-filled for X01)
+  cricketMarksPerRound: number; // average marks per round
+  cricketHighMarkRound: number; // highest marks in a single round (1-9)
+  cricketTriples: number;
+  cricketDoubles: number;
+  cricketSingles: number;
+  cricketBulls: number;
+  cricketMisses: number;
 }
 
 export function calculateGameStatsForPlayer(
@@ -159,23 +167,53 @@ function calculateX01Stats(
     dartsAtDouble,
     checkoutPct,
     dartsToFinish: totalDarts,
+    cricketMarksPerRound: 0,
+    cricketHighMarkRound: 0,
+    cricketTriples: 0,
+    cricketDoubles: 0,
+    cricketSingles: 0,
+    cricketBulls: 0,
+    cricketMisses: 0,
   };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function calculateCricketStats(playerTurns: Turn[], _won: boolean): GameStats {
   let totalMarks = 0;
-  const totalRounds = playerTurns.length;
+  let triples = 0;
+  let doubles = 0;
+  let singles = 0;
+  let bulls = 0;
+  let misses = 0;
+  let highMarkRound = 0;
+  let dartsThrown = 0;
 
   for (const turn of playerTurns) {
     const darts = turn.dartsDetail as CricketDart[];
-    totalMarks += darts.reduce((sum, d) => sum + d.marks, 0);
+    let roundMarks = 0;
+    for (const d of darts) {
+      dartsThrown += 1;
+      if (d.marks === 0) {
+        misses += 1;
+        continue;
+      }
+      totalMarks += d.marks;
+      roundMarks += d.marks;
+      if (d.marks === 3) triples += 1;
+      else if (d.marks === 2) doubles += 1;
+      else if (d.marks === 1) singles += 1;
+      if (d.number === 25) bulls += 1;
+    }
+    if (roundMarks > highMarkRound) highMarkRound = roundMarks;
   }
+
+  const totalRounds = playerTurns.length;
+  const marksPerRound = totalRounds > 0 ? totalMarks / totalRounds : 0;
 
   return {
     totalScore: totalMarks,
-    totalDarts: totalRounds * 3, // Cricket always 3 darts per turn
-    threeDartAvg: 0, // N/A for cricket
+    totalDarts: dartsThrown,
+    threeDartAvg: 0,
     first9Score: 0,
     first9Darts: 0,
     first9Avg: 0,
@@ -196,7 +234,14 @@ function calculateCricketStats(playerTurns: Turn[], _won: boolean): GameStats {
     checkoutsHit: 0,
     dartsAtDouble: 0,
     checkoutPct: 0,
-    dartsToFinish: 0,
+    dartsToFinish: dartsThrown,
+    cricketMarksPerRound: marksPerRound,
+    cricketHighMarkRound: highMarkRound,
+    cricketTriples: triples,
+    cricketDoubles: doubles,
+    cricketSingles: singles,
+    cricketBulls: bulls,
+    cricketMisses: misses,
   };
 }
 
