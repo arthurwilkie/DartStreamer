@@ -762,14 +762,11 @@ export default function GamePage() {
                   />
                 )}
                 {isCricketState(gameState) && (() => {
-                  // Left side = logged-in user, right side = other player.
-                  // Keeps the input grid visually aligned with the scoreboard
-                  // header tile each user sees on their own device.
-                  const leftId = userId;
-                  const rightId =
-                    gameState.player1Id === userId
-                      ? gameState.player2Id
-                      : gameState.player1Id;
+                  // Mirror the scoreboard: player1 is always on the left,
+                  // player2 always on the right, regardless of whose device
+                  // we're rendering on.
+                  const leftId = gameState.player1Id;
+                  const rightId = gameState.player2Id;
                   const activeSide: "left" | "right" =
                     gameState.currentPlayerId === leftId ? "left" : "right";
                   return (
