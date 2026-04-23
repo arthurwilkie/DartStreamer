@@ -70,37 +70,47 @@ function MarkGlyph({
   );
 }
 
+function dartLabel(dart: CricketDart): string | null {
+  if (dart.marks <= 0 || dart.number === 0) return null;
+  const prefix = dart.marks === 1 ? "S" : dart.marks === 2 ? "D" : "T";
+  if (dart.number === 25) return `${prefix}B`;
+  return `${prefix}${dart.number}`;
+}
+
 function DartPill({ dart }: { dart: CricketDart | undefined }) {
   if (!dart) {
     return (
-      <span className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-700 text-xs text-zinc-600">
+      <span className="flex h-9 min-w-[3rem] items-center justify-center rounded-full border border-zinc-700 px-3 text-xs text-zinc-600">
         —
       </span>
     );
   }
-  if (dart.marks === 0) {
+  const label = dartLabel(dart);
+  if (!label) {
     return (
-      <span className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-600 text-xs text-zinc-400">
-        miss
+      <span className="flex h-9 min-w-[3rem] items-center justify-center rounded-full border border-zinc-700 px-3 text-xs text-zinc-600">
+        —
       </span>
     );
   }
   return (
-    <span className="flex h-9 w-9 items-center justify-center rounded-full border border-emerald-500 bg-emerald-900/30">
-      <MarkGlyph marks={dart.marks} />
+    <span className="flex h-9 min-w-[3rem] items-center justify-center rounded-full border border-emerald-500 bg-emerald-900/30 px-3 text-sm font-semibold text-emerald-200">
+      {label}
     </span>
   );
 }
 
-function cellLabel(num: number, mult: 1 | 2 | 3): string | null {
-  if (num === 25) {
-    if (mult === 1) return "SB";
-    if (mult === 2) return "DB";
-    return null;
-  }
-  if (mult === 1) return `S${num}`;
-  if (mult === 2) return `D${num}`;
-  return `T${num}`;
+function Dots({ count }: { count: number }) {
+  return (
+    <div className="mt-1 flex items-center justify-center gap-1">
+      {Array.from({ length: count }).map((_, i) => (
+        <span
+          key={i}
+          className="inline-block h-1 w-1 rounded-full bg-zinc-400"
+        />
+      ))}
+    </div>
+  );
 }
 
 export function CricketInput({
@@ -184,7 +194,8 @@ export function CricketInput({
         </button>
       </div>
 
-      {/* Grid: [left marks | S | D | T | right marks] per number. */}
+      {/* Grid: [left marks | S | D | T | right marks] per number. Bull row
+          centers its 2 tap targets across the middle span. */}
       <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
         {CRICKET_NUMBERS.map((num) => {
           const leftMarks = marksForSide("left", num);
@@ -192,6 +203,14 @@ export function CricketInput({
           const leftCommitted = leftPlayerState?.numbers[num]?.marks ?? 0;
           const rightCommitted = rightPlayerState?.numbers[num]?.marks ?? 0;
           const bothClosed = leftCommitted >= 3 && rightCommitted >= 3;
+          const isBull = num === 25;
+          const label = isBull ? "Bull" : String(num);
+
+          const dartButtonClass = `flex flex-col items-center justify-center py-3 text-center transition-colors disabled:opacity-40 ${
+            bothClosed
+              ? "cursor-not-allowed"
+              : "hover:bg-zinc-900 active:bg-zinc-800"
+          }`;
 
           return (
             <div
@@ -204,26 +223,33 @@ export function CricketInput({
                 <MarkGlyph marks={leftMarks} side="left" dim={bothClosed} />
               </div>
 
-              {([1, 2, 3] as const).map((mult) => {
-                const label = cellLabel(num, mult);
-                if (!label) {
-                  return (
-                    <div
+              {isBull ? (
+                <div className="col-span-3 grid grid-cols-2 border-r border-zinc-800/80">
+                  {([1, 2] as const).map((mult) => (
+                    <button
                       key={mult}
-                      className="border-r border-zinc-800/80 bg-zinc-950"
-                    />
-                  );
-                }
-                return (
+                      onClick={() => addDart(num, mult)}
+                      disabled={disabled || dartsThrown >= 3 || bothClosed}
+                      className={dartButtonClass}
+                    >
+                      <span
+                        className={`text-lg font-semibold ${
+                          bothClosed ? "text-zinc-600" : "text-white"
+                        }`}
+                      >
+                        {label}
+                      </span>
+                      <Dots count={mult} />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                ([1, 2, 3] as const).map((mult) => (
                   <button
                     key={mult}
                     onClick={() => addDart(num, mult)}
                     disabled={disabled || dartsThrown >= 3 || bothClosed}
-                    className={`flex flex-col items-center justify-center border-r border-zinc-800/80 py-3 text-center transition-colors disabled:opacity-40 ${
-                      bothClosed
-                        ? "cursor-not-allowed"
-                        : "hover:bg-zinc-900 active:bg-zinc-800"
-                    }`}
+                    className={`${dartButtonClass} border-r border-zinc-800/80`}
                   >
                     <span
                       className={`text-lg font-semibold ${
@@ -232,9 +258,10 @@ export function CricketInput({
                     >
                       {label}
                     </span>
+                    <Dots count={mult} />
                   </button>
-                );
-              })}
+                ))
+              )}
 
               <div className="flex items-center justify-center py-3">
                 <MarkGlyph marks={rightMarks} side="right" dim={bothClosed} />
