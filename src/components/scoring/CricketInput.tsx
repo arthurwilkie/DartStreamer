@@ -206,7 +206,7 @@ export function CricketInput({
           const isBull = num === 25;
           const label = isBull ? "Bull" : String(num);
 
-          const dartButtonClass = `flex flex-col items-center justify-center py-1.5 text-center transition-colors disabled:opacity-40 ${
+          const dartButtonClass = `flex flex-col items-center justify-center py-2.5 text-center transition-colors disabled:opacity-40 ${
             bothClosed
               ? "cursor-not-allowed"
               : "hover:bg-zinc-900 active:bg-zinc-800"
@@ -216,10 +216,10 @@ export function CricketInput({
             <div
               key={num}
               className={`grid grid-cols-5 items-stretch border-b border-zinc-800/80 last:border-b-0 ${
-                bothClosed ? "bg-zinc-900/60 line-through" : ""
+                bothClosed ? "bg-zinc-900/60" : ""
               }`}
             >
-              <div className="flex items-center justify-center border-r border-zinc-800/80 py-1.5">
+              <div className="flex items-center justify-center border-r border-zinc-800/80 py-2.5">
                 <MarkGlyph marks={leftMarks} side="left" dim={bothClosed} />
               </div>
 
@@ -263,7 +263,7 @@ export function CricketInput({
                 ))
               )}
 
-              <div className="flex items-center justify-center py-1.5">
+              <div className="flex items-center justify-center py-2.5">
                 <MarkGlyph marks={rightMarks} side="right" dim={bothClosed} />
               </div>
             </div>
