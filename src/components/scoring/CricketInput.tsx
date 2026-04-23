@@ -38,8 +38,8 @@ function MarkGlyph({
   const closedTone = dim ? "border-zinc-600 text-zinc-500" : "border-emerald-400 text-emerald-400";
 
   if (marks <= 0) return <span className={tone}>&nbsp;</span>;
-  if (marks === 1) return <span className={`text-xl font-semibold ${tone}`}>/</span>;
-  if (marks === 2) return <span className={`text-xl font-semibold ${tone}`}>✕</span>;
+  if (marks === 1) return <span className={`text-2xl font-semibold ${tone}`}>/</span>;
+  if (marks === 2) return <span className={`text-2xl font-semibold ${tone}`}>✕</span>;
 
   const extras = marks - 3;
   const subscript =
@@ -52,7 +52,7 @@ function MarkGlyph({
     ) : null;
 
   const glyph = (
-    <span className="relative inline-flex h-6 w-6 items-center justify-center">
+    <span className="relative inline-flex h-7 w-7 items-center justify-center">
       <span className={`absolute inset-0 rounded-full border-2 ${closedTone}`} />
       <span className={`relative text-lg font-bold ${dim ? "text-zinc-500" : "text-emerald-400"}`}>
         ✕
@@ -102,7 +102,7 @@ function DartPill({ dart }: { dart: CricketDart | undefined }) {
 
 function Dots({ count }: { count: number }) {
   return (
-    <div className="mt-0.5 flex items-center justify-center gap-0.5">
+    <div className="mt-1 flex items-center justify-center gap-1">
       {Array.from({ length: count }).map((_, i) => (
         <span
           key={i}
@@ -206,7 +206,7 @@ export function CricketInput({
           const isBull = num === 25;
           const label = isBull ? "Bull" : String(num);
 
-          const dartButtonClass = `flex flex-col items-center justify-center py-2.5 text-center transition-colors disabled:opacity-40 ${
+          const dartButtonClass = `flex flex-col items-center justify-center py-3 text-center transition-colors disabled:opacity-40 ${
             bothClosed
               ? "cursor-not-allowed"
               : "hover:bg-zinc-900 active:bg-zinc-800"
@@ -219,7 +219,7 @@ export function CricketInput({
                 bothClosed ? "bg-zinc-900/60" : ""
               }`}
             >
-              <div className="flex items-center justify-center border-r border-zinc-800/80 py-2.5">
+              <div className="flex items-center justify-center border-r border-zinc-800/80 py-3">
                 <MarkGlyph marks={leftMarks} side="left" dim={bothClosed} />
               </div>
 
@@ -233,7 +233,7 @@ export function CricketInput({
                       className={dartButtonClass}
                     >
                       <span
-                        className={`text-base font-semibold ${
+                        className={`text-lg font-semibold ${
                           bothClosed ? "text-zinc-600" : "text-white"
                         }`}
                       >
@@ -252,7 +252,7 @@ export function CricketInput({
                     className={`${dartButtonClass} border-r border-zinc-800/80`}
                   >
                     <span
-                      className={`text-base font-semibold ${
+                      className={`text-lg font-semibold ${
                         bothClosed ? "text-zinc-600" : "text-white"
                       }`}
                     >
@@ -263,7 +263,7 @@ export function CricketInput({
                 ))
               )}
 
-              <div className="flex items-center justify-center py-2.5">
+              <div className="flex items-center justify-center py-3">
                 <MarkGlyph marks={rightMarks} side="right" dim={bothClosed} />
               </div>
             </div>

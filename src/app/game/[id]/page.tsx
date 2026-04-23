@@ -748,7 +748,7 @@ export default function GamePage() {
         )}
 
         {/* Scoreboard */}
-        <div className="mt-2">
+        <div className="mt-4">
           {isX01State(gameState) && (
             <X01Scoreboard
               state={gameState}
@@ -767,7 +767,7 @@ export default function GamePage() {
 
         {/* Score input OR opponent camera feed */}
         {!isFinished && (
-          <div className="mt-2">
+          <div className="mt-4">
             {showOpponentCamera ? (
               <OpponentCameraFeed
                 opponentName={opponentName}
